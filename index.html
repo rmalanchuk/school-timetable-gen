@@ -82,8 +82,9 @@
             <div class="flex justify-between items-center mb-6">
                 <h1 class="text-3xl font-extrabold text-slate-800">Готовий розклад</h1>
                 <div class="flex gap-2">
-                    <button class="bg-gray-200 text-gray-700 px-4 py-2 rounded-lg font-bold hover:bg-gray-300">Налаштування алгоритму</button>
-                    <button class="bg-green-600 text-white px-6 py-2 rounded-lg font-bold hover:bg-green-700 shadow-lg shadow-green-200 italic">Запустити генерацію</button>
+                    <button onclick="generateSchedule()" class="bg-green-600 text-white px-6 py-2 rounded-lg font-bold hover:bg-green-700 shadow-lg shadow-green-200">
+                        Запустити генерацію
+                    </button>
                 </div>
             </div>
             <div id="schedule-output" class="grid grid-cols-1 gap-8">
