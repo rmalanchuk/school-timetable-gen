@@ -430,7 +430,7 @@ function printSchedule() {
     const printWindow = window.open('', '_blank');
     const dateStr = new Date().toLocaleDateString('uk-UA');
 
-    // Шапка: Прізвище + Ініціали (Прізвище йде першим)
+    // Прізвище першим + Ініціали
     const teacherHeaders = state.teachers.map(t => {
         const p = t.name.split(' ');
         const shortName = p[0] + (p[1] ? ` ${p[1][0]}.` : '') + (p[2] ? `${p[2][0]}.` : '');
@@ -451,15 +451,15 @@ function printSchedule() {
                 state.classes.forEach(cls => {
                     const lesson = state.schedule[cls.id] ? state.schedule[cls.id][dIdx][lIdx] : null;
                     if (lesson && lesson.teacherId === teacher.id) {
-                        // ЛОГІКА: Тільки цифри (7) + літери предмета, якщо будуть (прибираємо "клас")
+                        // Видаляємо "клас", лишаємо цифру та інше
                         cellContent = cls.name.replace(/клас|класу/gi, '').trim();
                     }
                 });
                 
-                // Перевірка вікон (хрестики)
-                const isBlocked = teacher.availability && !teacher.availability[dIdx][lIdx];
-                const clsName = cellContent ? 'lesson-active' : (isBlocked ? 'cell-blocked' : '');
+                // ЖОРСТКА ПЕРЕВІРКА ХРЕСТИКІВ
+                const isBlocked = teacher.availability && teacher.availability[dIdx] && teacher.availability[dIdx][lIdx] === false;
                 const displayValue = cellContent || (isBlocked ? '✕' : '');
+                const clsName = cellContent ? 'lesson-active' : (isBlocked ? 'cell-blocked' : '');
                 
                 row += `<td class="content-cell ${clsName}">${displayValue}</td>`;
             });
@@ -479,66 +479,37 @@ function printSchedule() {
                     body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
                 }
                 body { font-family: "Arial Narrow", Arial, sans-serif; margin: 0; padding: 0; background: white; }
-                
-                /* РОЗТЯГУЄМО ТАБЛИЦЮ НА ВЕСЬ ЛИСТ */
-                table { 
-                    border-collapse: collapse; 
-                    width: 100%; 
-                    table-layout: fixed; 
-                    border: 2px solid black !important; 
-                }
-                
+                table { border-collapse: collapse; width: 100%; table-layout: fixed; border: 2px solid black !important; }
                 th, td { border: 1px solid black !important; text-align: center; padding: 0 !important; }
-
-                /* ФІКСОВАНА ШИРИНА ДЛЯ ДНЯ ТА НОМЕРА (решта розтягнеться рівномірно) */
-                .day-cell { width: 20px !important; background: #f0f0f0 !important; }
+                .day-cell { width: 20px !important; background: #f0f0f0 !important; font-weight: bold; }
                 .num-cell { width: 18px !important; font-weight: bold; font-size: 9px; }
-                
-                /* ШАПКА ВЧИТЕЛІВ */
-                .t-col { height: 90px; position: relative; vertical-align: bottom; }
+                .t-col { height: 90px; position: relative; }
                 .t-rotate { position: absolute; bottom: 0; left: 0; right: 0; height: 90px; }
                 .t-rotate span { 
-                    transform: rotate(-90deg); 
-                    transform-origin: left bottom; 
-                    white-space: nowrap; 
-                    display: block; 
-                    font-weight: bold; 
-                    font-size: 9px;
-                    position: absolute;
-                    bottom: 3px; 
-                    left: 55%; 
-                    width: 85px;
-                    text-align: left;
+                    transform: rotate(-90deg); transform-origin: left bottom; 
+                    white-space: nowrap; display: block; font-weight: bold; font-size: 9px;
+                    position: absolute; bottom: 3px; left: 55%; width: 85px; text-align: left;
                 }
-
                 .day-rotate { transform: rotate(-90deg); white-space: nowrap; text-transform: uppercase; font-size: 8px; font-weight: bold; }
-                
                 tr.l-row { height: 18px; }
                 .content-cell { font-size: 10px; height: 18px; }
                 .lesson-active { background-color: #f1f5f9 !important; font-weight: 900; }
-                .cell-blocked { color: #aaa !important; font-size: 9px; }
-                
+                .cell-blocked { color: #aaa !important; font-size: 9px; font-weight: normal; }
                 .day-divider { height: 2px; background: black !important; }
-                .day-divider td { border: none !important; height: 2px; }
-                
                 h2 { font-size: 12px; margin: 5px; text-align: center; text-transform: uppercase; }
             </style>
         </head>
         <body>
-            <h2>Зведений розклад (на ${dateStr})</h2>
+            <h2>ЗВЕДЕНИЙ РОЗКЛАД (на ${dateStr})</h2>
             <table>
                 <thead>
-                    <tr>
-                        <th colspan="2" style="height:20px; font-size:8px;">ДН/№</th>
-                        ${teacherHeaders}
-                    </tr>
+                    <tr><th colspan="2" style="height:20px; font-size:8px;">ДН/№</th>${teacherHeaders}</tr>
                 </thead>
                 <tbody>${bodyRows}</tbody>
             </table>
         </body>
         </html>
     `);
-
     printWindow.document.close();
     setTimeout(() => { printWindow.print(); }, 500);
 }
