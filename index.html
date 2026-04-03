@@ -100,5 +100,22 @@
         </button>
     </footer>
 
+    <div id="modal-availability" class="hidden fixed inset-0 bg-black bg-opacity-50 z-[100] flex items-center justify-center p-4">
+        <div class="bg-white rounded-xl max-w-2xl w-full p-6 shadow-2xl">
+            <div class="flex justify-between items-center mb-4">
+                <h3 id="modal-teacher-name" class="text-xl font-bold">Налаштування доступності</h3>
+                <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600 text-2xl">&times;</button>
+            </div>
+            <p class="text-sm text-gray-500 mb-4">Натисніть на клітинку, щоб змінити статус: <span class="text-green-600 font-bold">Зелений</span> — вільний, <span class="text-red-500 font-bold">Червоний</span> — зайнятий.</p>
+            
+            <div id="availability-grid" class="overflow-auto max-h-[60vh]">
+                </div>
+    
+            <div class="mt-6 flex justify-end">
+                <button onclick="closeModal()" class="bg-blue-600 text-white px-6 py-2 rounded-lg font-bold">Готово</button>
+            </div>
+        </div>
+    </div>
+    
 </body>
 </html>
