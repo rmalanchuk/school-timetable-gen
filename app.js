@@ -158,7 +158,7 @@ function toggleAvailability(dayIndex, lessonIndex) {
     }
 }
 
-/ --- ГЕНЕРАТОР РОЗКЛАДУ ---
+// --- ГЕНЕРАТОР РОЗКЛАДУ ---
 
 function generateSchedule() {
     // Створюємо порожню сітку для кожного класу
