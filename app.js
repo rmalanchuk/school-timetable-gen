@@ -420,19 +420,30 @@ function updateWorkload(teacherId, classId, value) {
     // Не викликаємо renderAll(), щоб не "стрибав" фокус з інпуту при введенні
 }
 
-// Ініціалізація
+// --- ВІЗУАЛІЗАЦІЯ ТА ДРУК ---
 
-}).join('');
+function printSchedule() {
+    if (!state.schedule || Object.keys(state.schedule).length === 0) {
+        alert("Спочатку згенеруйте розклад!");
+        return;
+    }
+
+    const printWindow = window.open('', '_blank');
+    const dateStr = new Date().toLocaleDateString('uk-UA');
+
+    const teacherHeaders = state.teachers.map(t => {
+        const p = t.name.split(' ');
+        const shortName = p[0] + (p[1] ? ` ${p[1][0]}.` : '') + (p[2] ? `${p[2][0]}.` : '');
+        return `<th class="t-col"><div class="t-rotate"><span>${shortName}</span></div></th>`;
+    }).join('');
 
     let bodyRows = '';
     state.config.days.forEach((day, dIdx) => {
         for (let lIdx = 0; lIdx < state.config.maxLessons; lIdx++) {
             let row = `<tr>`;
-            
             if (lIdx === 0) {
                 row += `<td rowspan="${state.config.maxLessons}" class="day-cell"><div class="day-rotate">${day}</div></td>`;
             }
-            
             row += `<td class="num-cell">${lIdx + 1}</td>`;
 
             state.teachers.forEach(teacher => {
@@ -440,18 +451,13 @@ function updateWorkload(teacherId, classId, value) {
                 state.classes.forEach(cls => {
                     const lesson = state.schedule[cls.id] ? state.schedule[cls.id][dIdx][lIdx] : null;
                     if (lesson && lesson.teacherId === teacher.id) {
-                        // ПИШЕМО ТІЛЬКИ ЦИФРУ (прибираємо слово "клас")
-                        cellContent = cls.name.replace(/\D/g, ''); 
-                        // Якщо в назві класу були букви (напр. "7-А"), залишимо їх:
-                        if (!cellContent) cellContent = cls.name.split(' ')[0];
+                        cellContent = cls.name.replace(/[^\dА-Яа-яA-Za-z]/g, ''); 
                     }
                 });
-                
                 const isBlocked = teacher.availability && !teacher.availability[dIdx][lIdx];
                 const clsName = cellContent ? 'lesson-active' : (isBlocked ? 'cell-blocked' : '');
                 row += `<td class="content-cell ${clsName}">${cellContent || (isBlocked ? '✕' : '')}</td>`;
             });
-
             row += `</tr>`;
             bodyRows += row;
         }
@@ -463,61 +469,41 @@ function updateWorkload(teacherId, classId, value) {
         <head>
             <title>Розклад ${dateStr}</title>
             <style>
-                @media print { 
-                    @page { size: A4 landscape; margin: 3mm; } 
-                    body { -webkit-print-color-adjust: exact; }
-                }
+                @media print { @page { size: A4 landscape; margin: 3mm; } body { -webkit-print-color-adjust: exact; } }
                 body { font-family: "Arial Narrow", Arial, sans-serif; margin: 0; padding: 5px; }
                 table { border-collapse: collapse; width: 100%; table-layout: fixed; border: 2px solid #000; }
-                
-                /* ПЕРШІ ДВІ КОЛОНКИ: МАКСИМАЛЬНО ВУЗЬКІ */
                 .day-cell { width: 18px !important; background: #f0f0f0; font-weight: bold; border: 1px solid #000; }
-                .num-cell { width: 15px !important; font-weight: bold; background: #fff; border: 1px solid #000; font-size: 9px; }
-                
-                .t-col { width: 20px; height: 100px; position: relative; border: 1px solid #000; vertical-align: bottom; }
-                
-                /* ПРІЗВИЩА ОПУЩЕНІ ДОНИЗУ */
+                .num-cell { width: 15px !important; font-weight: bold; border: 1px solid #000; font-size: 9px; }
+                .t-col { width: 22px; height: 100px; position: relative; border: 1px solid #000; vertical-align: bottom; }
                 .t-rotate { position: absolute; bottom: 2px; left: 50%; transform: translateX(-50%); width: 100%; }
-                .t-rotate span { 
-                    transform: rotate(-90deg); 
-                    transform-origin: center; 
-                    white-space: nowrap; 
-                    display: block; 
-                    font-weight: bold; 
-                    font-size: 9px;
-                    width: 90px;
-                    text-align: left;
-                    margin-left: -35px; /* Регулювання "висоти" тексту над сіткою */
-                }
-
+                .t-rotate span { transform: rotate(-90deg); transform-origin: center; white-space: nowrap; display: block; font-weight: bold; font-size: 9px; width: 90px; text-align: left; margin-left: -35px; }
                 .day-rotate { transform: rotate(-90deg); white-space: nowrap; text-transform: uppercase; font-size: 8px; letter-spacing: 1px; }
-                
                 td { border: 1px solid #000; text-align: center; height: 16px; font-size: 10px; padding: 0 !important; }
-                
-                .content-cell { font-weight: normal; }
                 .lesson-active { background-color: #e2e8f0 !important; font-weight: bold; font-size: 11px; }
                 .cell-blocked { background-color: #f1f1f1; color: #aaa; font-size: 8px; }
                 .day-divider { height: 2px; background: #000; }
-                
                 h2 { text-align: center; font-size: 12px; margin: 0 0 5px 0; text-transform: uppercase; }
             </style>
         </head>
         <body>
             <h2>Зведений розклад (на ${dateStr})</h2>
             <table>
-                <thead>
-                    <tr>
-                        <th colspan="2" style="height:20px; font-size:8px;">ДН/№</th>
-                        ${teacherHeaders}
-                    </tr>
-                </thead>
+                <thead><tr><th colspan="2" style="height:20px; font-size:8px;">ДН/№</th>${teacherHeaders}</tr></thead>
                 <tbody>${bodyRows}</tbody>
             </table>
         </body>
         </html>
     `);
-
     printWindow.document.close();
     setTimeout(() => { printWindow.print(); }, 500);
 }
+
+function renderAll() {
+    renderTeachers();
+    renderClasses();
+    renderWorkload();
+    renderSchedule();
+}
+
+// Запуск при завантаженні
 window.onload = init;
