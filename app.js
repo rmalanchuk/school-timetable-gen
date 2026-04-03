@@ -422,55 +422,39 @@ function updateWorkload(teacherId, classId, value) {
 
 // Ініціалізація
 
-function printSchedule() {
-    if (!state.schedule || Object.keys(state.schedule).length === 0) {
-        alert("Спочатку згенеруйте розклад!");
-        return;
-    }
+}).join('');
 
-    const printWindow = window.open('', '_blank');
-    const dateStr = new Date().toLocaleDateString('uk-UA');
-
-    // Формуємо шапку вчителів (Вертикально + Скорочено)
-    const teacherHeaders = state.teachers.map(t => {
-        const p = t.name.split(' ');
-        const shortName = p[0] + (p[1] ? ` ${p[1][0]}.` : '') + (p[2] ? `${p[2][0]}.` : '');
-        return `<th class="t-col"><div class="t-rotate"><span>${shortName}</span></div></th>`;
-    }).join('');
-
-    // Формуємо тіло таблиці
     let bodyRows = '';
     state.config.days.forEach((day, dIdx) => {
         for (let lIdx = 0; lIdx < state.config.maxLessons; lIdx++) {
             let row = `<tr>`;
             
-            // Тільки для першого уроку дня додаємо назву дня
             if (lIdx === 0) {
                 row += `<td rowspan="${state.config.maxLessons}" class="day-cell"><div class="day-rotate">${day}</div></td>`;
             }
             
-            // Номер уроку (тільки в цій колонці)
             row += `<td class="num-cell">${lIdx + 1}</td>`;
 
-            // Уроки вчителів
             state.teachers.forEach(teacher => {
                 let cellContent = "";
                 state.classes.forEach(cls => {
                     const lesson = state.schedule[cls.id] ? state.schedule[cls.id][dIdx][lIdx] : null;
                     if (lesson && lesson.teacherId === teacher.id) {
-                        cellContent = cls.name;
+                        // ПИШЕМО ТІЛЬКИ ЦИФРУ (прибираємо слово "клас")
+                        cellContent = cls.name.replace(/\D/g, ''); 
+                        // Якщо в назві класу були букви (напр. "7-А"), залишимо їх:
+                        if (!cellContent) cellContent = cls.name.split(' ')[0];
                     }
                 });
                 
                 const isBlocked = teacher.availability && !teacher.availability[dIdx][lIdx];
-                const cls = cellContent ? 'lesson-active' : (isBlocked ? 'cell-blocked' : '');
-                row += `<td class="content-cell ${cls}">${cellContent || (isBlocked ? '✕' : '')}</td>`;
+                const clsName = cellContent ? 'lesson-active' : (isBlocked ? 'cell-blocked' : '');
+                row += `<td class="content-cell ${clsName}">${cellContent || (isBlocked ? '✕' : '')}</td>`;
             });
 
             row += `</tr>`;
             bodyRows += row;
         }
-        // Жирна лінія між днями
         bodyRows += `<tr class="day-divider"><td colspan="${state.teachers.length + 2}"></td></tr>`;
     });
 
@@ -479,35 +463,51 @@ function printSchedule() {
         <head>
             <title>Розклад ${dateStr}</title>
             <style>
-                @media print { @page { size: A4 landscape; margin: 5mm; } }
-                body { font-family: Arial, sans-serif; margin: 0; padding: 10px; }
-                table { border-collapse: collapse; width: 100%; table-layout: fixed; }
-                th, td { border: 1px solid #000; text-align: center; padding: 0 !important; height: 20px; font-size: 10px; }
+                @media print { 
+                    @page { size: A4 landscape; margin: 3mm; } 
+                    body { -webkit-print-color-adjust: exact; }
+                }
+                body { font-family: "Arial Narrow", Arial, sans-serif; margin: 0; padding: 5px; }
+                table { border-collapse: collapse; width: 100%; table-layout: fixed; border: 2px solid #000; }
                 
-                /* Вертикальні вчителі */
-                .t-col { width: 22px; height: 90px; position: relative; background: #f9f9f9; }
-                .t-rotate { position: absolute; bottom: 5px; left: 50%; transform: translateX(-50%); width: 20px; height: 80px; }
-                .t-rotate span { transform: rotate(-90deg); transform-origin: center; white-space: nowrap; display: block; font-weight: bold; width: 80px; text-align: left; margin-left: -30px; }
+                /* ПЕРШІ ДВІ КОЛОНКИ: МАКСИМАЛЬНО ВУЗЬКІ */
+                .day-cell { width: 18px !important; background: #f0f0f0; font-weight: bold; border: 1px solid #000; }
+                .num-cell { width: 15px !important; font-weight: bold; background: #fff; border: 1px solid #000; font-size: 9px; }
+                
+                .t-col { width: 20px; height: 100px; position: relative; border: 1px solid #000; vertical-align: bottom; }
+                
+                /* ПРІЗВИЩА ОПУЩЕНІ ДОНИЗУ */
+                .t-rotate { position: absolute; bottom: 2px; left: 50%; transform: translateX(-50%); width: 100%; }
+                .t-rotate span { 
+                    transform: rotate(-90deg); 
+                    transform-origin: center; 
+                    white-space: nowrap; 
+                    display: block; 
+                    font-weight: bold; 
+                    font-size: 9px;
+                    width: 90px;
+                    text-align: left;
+                    margin-left: -35px; /* Регулювання "висоти" тексту над сіткою */
+                }
 
-                /* Дні та номери */
-                .day-cell { width: 25px; font-weight: bold; background: #eee; }
-                .day-rotate { transform: rotate(-90deg); white-space: nowrap; text-transform: uppercase; font-size: 9px; }
-                .num-cell { width: 20px; font-weight: bold; background: #f0f0f0; }
-
-                /* Контент */
-                .content-cell { font-size: 9px; }
-                .lesson-active { background-color: #d1e9ff !important; font-weight: bold; -webkit-print-color-adjust: exact; }
-                .cell-blocked { background-color: #f0f0f0; color: #ccc; }
-                .day-divider { height: 3px; background: #000; }
-                h2 { text-align: center; font-size: 14px; margin: 0 0 10px 0; }
+                .day-rotate { transform: rotate(-90deg); white-space: nowrap; text-transform: uppercase; font-size: 8px; letter-spacing: 1px; }
+                
+                td { border: 1px solid #000; text-align: center; height: 16px; font-size: 10px; padding: 0 !important; }
+                
+                .content-cell { font-weight: normal; }
+                .lesson-active { background-color: #e2e8f0 !important; font-weight: bold; font-size: 11px; }
+                .cell-blocked { background-color: #f1f1f1; color: #aaa; font-size: 8px; }
+                .day-divider { height: 2px; background: #000; }
+                
+                h2 { text-align: center; font-size: 12px; margin: 0 0 5px 0; text-transform: uppercase; }
             </style>
         </head>
         <body>
-            <h2>ЗВЕДЕНИЙ РОЗКЛАД ВЧИТЕЛІВ (на ${dateStr})</h2>
+            <h2>Зведений розклад (на ${dateStr})</h2>
             <table>
                 <thead>
                     <tr>
-                        <th colspan="2" style="height:20px">День / №</th>
+                        <th colspan="2" style="height:20px; font-size:8px;">ДН/№</th>
                         ${teacherHeaders}
                     </tr>
                 </thead>
