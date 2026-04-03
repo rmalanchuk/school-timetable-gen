@@ -421,4 +421,51 @@ function updateWorkload(teacherId, classId, value) {
 }
 
 // Ініціалізація
+
+function printSchedule() {
+    const printWindow = window.open('', '_blank');
+    const scheduleHtml = document.getElementById('schedule-output').innerHTML;
+    
+    // Отримуємо поточну дату для заголовку
+    const date = new Date().toLocaleDateString('uk-UA');
+
+    printWindow.document.write(`
+        <html>
+            <head>
+                <title>Розклад занять - ${date}</title>
+                <script src="https://cdn.tailwindcss.com"></script>
+                <style>
+                    @media print {
+                        @page { 
+                            size: A4 landscape; 
+                            margin: 10mm; 
+                        }
+                        body { -webkit-print-color-adjust: exact; }
+                    }
+                    table { table-layout: fixed; width: 100%; border-collapse: collapse; }
+                    th, td { border: 1px solid #000 !important; font-size: 9px !important; line-height: 1.1 !important; height: auto !important; }
+                    .sticky, button, .mt-4 { display: none !important; } /* Ховаємо зайве */
+                    th { background-color: #f1f5f9 !important; color: #000 !important; }
+                    .bg-blue-600 { background-color: #e0f2fe !important; color: #000 !important; font-weight: bold !important; }
+                    .bg-slate-800 { background-color: #f1f5f9 !important; color: #000 !important; }
+                </style>
+            </head>
+            <body class="p-4">
+                <div class="text-center mb-4">
+                    <h1 class="text-xl font-bold uppercase">Зведений розклад занять вчителів</h1>
+                    <p class="text-sm italic">Дата формування: ${date}</p>
+                </div>
+                ${scheduleHtml}
+            </body>
+        </html>
+    `);
+
+    printWindow.document.close();
+    
+    // Чекаємо завантаження Tailwind і викликаємо діалог друку
+    setTimeout(() => {
+        printWindow.print();
+    }, 500);
+}
+
 window.onload = init;
