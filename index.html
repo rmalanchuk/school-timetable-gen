@@ -1,1 +1,104 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>School Schedule Pro | Система управління розкладом</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="app.js" defer></script>
+    <style>
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        /* Стиль для активної кнопки навігації */
+        .nav-btn.active { 
+            background-color: rgba(255, 255, 255, 0.1); 
+            border-bottom: 3px solid #60a5fa; 
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen font-sans text-gray-900">
 
+    <nav class="bg-slate-900 text-white shadow-xl sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto flex flex-wrap items-center">
+            <div class="px-6 py-4 flex items-center gap-2 bg-blue-600 font-black tracking-tighter">
+                <span>SS</span><span class="text-blue-200">PRO</span>
+            </div>
+            <div class="flex flex-1 overflow-x-auto">
+                <button onclick="showTab('teachers')" id="btn-teachers" class="nav-btn active px-6 py-4 hover:bg-slate-800 transition whitespace-nowrap">Вчителі</button>
+                <button onclick="showTab('classes')" id="btn-classes" class="nav-btn px-6 py-4 hover:bg-slate-800 transition whitespace-nowrap">Класи</button>
+                <button onclick="showTab('workload')" id="btn-workload" class="nav-btn px-6 py-4 hover:bg-slate-800 transition whitespace-nowrap">Навантаження</button>
+                <button onclick="showTab('schedule')" id="btn-schedule" class="nav-btn px-6 py-4 hover:bg-slate-800 transition whitespace-nowrap text-green-400 font-bold">Розклад 🚀</button>
+            </div>
+        </div>
+    </nav>
+
+    <main class="max-w-7xl mx-auto p-4 md:p-8">
+        
+        <section id="tab-teachers" class="tab-content active">
+            <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
+                <div>
+                    <h1 class="text-3xl font-extrabold text-slate-800">Викладацький склад</h1>
+                    <p class="text-gray-500">Додайте вчителів та налаштуйте їх доступність</p>
+                </div>
+                <div class="flex w-full md:w-auto gap-2">
+                    <input id="teacher-name" type="text" placeholder="ПІБ вчителя" class="flex-1 md:w-64 border-2 border-gray-200 p-2 rounded-lg focus:border-blue-500 outline-none transition">
+                    <button onclick="addTeacher()" class="bg-blue-600 text-white px-6 py-2 rounded-lg font-bold hover:bg-blue-700 shadow-lg shadow-blue-200 transition">Додати</button>
+                </div>
+            </div>
+            <div id="list-teachers" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                </div>
+        </section>
+
+        <section id="tab-classes" class="tab-content">
+            <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
+                <div>
+                    <h1 class="text-3xl font-extrabold text-slate-800">Класи та Групи</h1>
+                    <p class="text-gray-500">Список навчальних груп для розподілу годин</p>
+                </div>
+                <div class="flex w-full md:w-auto gap-2">
+                    <input id="class-name" type="text" placeholder="Назва (напр. 5-А)" class="flex-1 md:w-48 border-2 border-gray-200 p-2 rounded-lg focus:border-blue-500 outline-none">
+                    <button onclick="addClass()" class="bg-blue-600 text-white px-6 py-2 rounded-lg font-bold hover:bg-blue-700 shadow-lg shadow-blue-200">Створити</button>
+                </div>
+            </div>
+            <div id="list-classes" class="flex flex-wrap gap-3">
+                </div>
+        </section>
+
+        <section id="tab-workload" class="tab-content">
+            <h1 class="text-3xl font-extrabold text-slate-800 mb-2">Матриця навантаження</h1>
+            <p class="text-gray-500 mb-6">Вкажіть кількість годин на тиждень для кожного вчителя у відповідних класах</p>
+            <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                <div class="overflow-x-auto">
+                    <div id="workload-container">
+                        <div class="p-10 text-center text-gray-400">
+                            Додайте хоча б одного вчителя та один клас для формування матриці.
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section id="tab-schedule" class="tab-content">
+            <div class="flex justify-between items-center mb-6">
+                <h1 class="text-3xl font-extrabold text-slate-800">Готовий розклад</h1>
+                <div class="flex gap-2">
+                    <button class="bg-gray-200 text-gray-700 px-4 py-2 rounded-lg font-bold hover:bg-gray-300">Налаштування алгоритму</button>
+                    <button class="bg-green-600 text-white px-6 py-2 rounded-lg font-bold hover:bg-green-700 shadow-lg shadow-green-200 italic">Запустити генерацію</button>
+                </div>
+            </div>
+            <div id="schedule-output" class="grid grid-cols-1 gap-8">
+                </div>
+        </section>
+
+    </main>
+
+    <footer class="fixed bottom-6 right-6 flex flex-col gap-2">
+        <button onclick="exportData()" title="Зберегти проект у файл" class="bg-slate-800 text-white p-4 rounded-full shadow-2xl hover:scale-110 transition-transform flex items-center justify-center">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
+            </svg>
+        </button>
+    </footer>
+
+</body>
+</html>
