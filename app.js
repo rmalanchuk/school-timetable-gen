@@ -451,15 +451,26 @@ function printSchedule() {
                 state.classes.forEach(cls => {
                     const lesson = state.schedule[cls.id] ? state.schedule[cls.id][dIdx][lIdx] : null;
                     if (lesson && lesson.teacherId === teacher.id) {
-                        // Видаляємо "клас", лишаємо цифру/літери
                         cellContent = cls.name.replace(/клас|класу/gi, '').trim();
                     }
                 });
                 
-                // УНІВЕРСАЛЬНА ПЕРЕВІРКА:
-                // Якщо в розкладі пусто І (немає масиву availability АБО значення в ньому "falsy")
-                const isAvailable = teacher.availability && teacher.availability[dIdx] && (teacher.availability[dIdx][lIdx] === true || teacher.availability[dIdx][lIdx] === 1);
-                const isBlocked = !isAvailable; 
+                // МАКСИМАЛЬНО СУВОРА ПЕРЕВІРКА
+                // Клітинка вважається заблокованою (isBlocked), якщо там немає уроку 
+                // І в налаштуваннях вчителя на цей час НЕ стоїть чітке "true"
+                let isBlocked = false;
+                if (!cellContent) {
+                    if (teacher.availability && teacher.availability[dIdx]) {
+                        const val = teacher.availability[dIdx][lIdx];
+                        // Якщо там false, 0, null або undefined — ставимо хрестик
+                        if (val !== true && val !== 1) {
+                            isBlocked = true;
+                        }
+                    } else {
+                        // Якщо даних про доступність взагалі немає для цього дня — теж ставимо хрестик
+                        isBlocked = true;
+                    }
+                }
 
                 const displayValue = cellContent || (isBlocked ? '✕' : '');
                 const clsName = cellContent ? 'lesson-active' : (isBlocked ? 'cell-blocked' : '');
