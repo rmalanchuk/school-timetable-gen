@@ -158,12 +158,126 @@ function toggleAvailability(dayIndex, lessonIndex) {
     }
 }
 
-// --- Рендеринг інтерфейсу ---
+/ --- ГЕНЕРАТОР РОЗКЛАДУ ---
 
+function generateSchedule() {
+    // Створюємо порожню сітку для кожного класу
+    const schedule = {};
+    state.classes.forEach(cls => {
+        schedule[cls.id] = Array(5).fill(null).map(() => Array(state.config.maxLessons).fill(null));
+    });
+
+    // Формуємо плоский список усіх занять, які треба поставити
+    let itemsToPlace = [];
+    state.teachers.forEach(t => {
+        t.workload.forEach(w => {
+            for (let i = 0; i < w.hours; i++) {
+                itemsToPlace.push({
+                    teacherId: t.id,
+                    teacherName: t.name,
+                    classId: w.classId
+                });
+            }
+        });
+    });
+
+    // Сортуємо: спочатку ті класи, де більше всього годин (жадібний підхід)
+    itemsToPlace.sort((a, b) => {
+        const countA = itemsToPlace.filter(x => x.classId === a.classId).length;
+        const countB = itemsToPlace.filter(x => x.classId === b.classId).length;
+        return countB - countA;
+    });
+
+    // Проходимо по кожному заняттю і шукаємо йому місце
+    itemsToPlace.forEach(item => {
+        let placed = false;
+        for (let day = 0; day < 5; day++) {
+            if (placed) break;
+            for (let lesson = 0; lesson < state.config.maxLessons; lesson++) {
+                if (placed) break;
+
+                // Перевірка 1: Чи вільний клас?
+                if (schedule[item.classId][day][lesson] !== null) continue;
+
+                // Перевірка 2: Чи вільний вчитель (не в іншому класі)?
+                const teacherBusy = Object.values(schedule).some(s => 
+                    s[day][lesson] && s[day][lesson].teacherId === item.teacherId
+                );
+                if (teacherBusy) continue;
+
+                // Перевірка 3: Чи доступний вчитель за графіком?
+                const teacher = state.teachers.find(t => t.id === item.teacherId);
+                if (teacher.availability && !teacher.availability[day][lesson]) continue;
+
+                // Якщо все ок — ставимо
+                schedule[item.classId][day][lesson] = {
+                    teacherName: item.teacherName,
+                    teacherId: item.teacherId
+                };
+                placed = true;
+            }
+        }
+    });
+
+    state.schedule = schedule;
+    save();
+    renderAll(); // Перемальовуємо все, включаючи нову вкладку розкладу
+}
+
+function renderSchedule() {
+    const container = document.getElementById('schedule-output');
+    if (!container) return;
+
+    if (!state.schedule || Object.keys(state.schedule).length === 0) {
+        container.innerHTML = '<div class="p-10 text-center text-gray-400">Натисніть "Запустити генерацію", щоб створити розклад.</div>';
+        return;
+    }
+
+    container.innerHTML = state.classes.map(cls => {
+        const classSched = state.schedule[cls.id];
+        if (!classSched) return '';
+
+        return `
+            <div class="bg-white rounded-xl shadow-sm border border-gray-200 mb-10 overflow-hidden">
+                <div class="bg-slate-50 border-b p-4">
+                    <h3 class="text-xl font-bold text-slate-800">Клас: ${cls.name}</h3>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full border-collapse">
+                        <thead>
+                            <tr class="bg-slate-100">
+                                <th class="border p-2 w-12 text-xs uppercase text-slate-500">№</th>
+                                ${state.config.days.map(d => `<th class="border p-2 text-sm font-bold text-slate-700">${d}</th>`).join('')}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${Array(state.config.maxLessons).fill().map((_, lIdx) => `
+                                <tr>
+                                    <td class="border p-2 text-center bg-slate-50 font-bold text-slate-400 text-xs">${lIdx + 1}</td>
+                                    ${[0, 1, 2, 3, 4].map(dIdx => {
+                                        const lesson = classSched[dIdx][lIdx];
+                                        return `
+                                            <td class="border p-2 text-center h-16 min-w-[120px] transition-colors ${lesson ? 'bg-blue-50' : ''}">
+                                                ${lesson ? `<div class="text-sm font-bold text-blue-900 leading-tight">${lesson.teacherName}</div>` : ''}
+                                            </td>
+                                        `;
+                                    }).join('')}
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+// ОНОВИ ЦЮ ФУНКЦІЮ у себе:
 function renderAll() {
     renderTeachers();
     renderClasses();
     renderWorkload();
+    renderSchedule(); // Додано тут
 }
 
 function renderTeachers() {
