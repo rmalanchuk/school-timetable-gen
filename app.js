@@ -451,13 +451,16 @@ function printSchedule() {
                 state.classes.forEach(cls => {
                     const lesson = state.schedule[cls.id] ? state.schedule[cls.id][dIdx][lIdx] : null;
                     if (lesson && lesson.teacherId === teacher.id) {
-                        // Видаляємо "клас", лишаємо цифру та інше
+                        // Видаляємо "клас", лишаємо цифру/літери
                         cellContent = cls.name.replace(/клас|класу/gi, '').trim();
                     }
                 });
                 
-                // ЖОРСТКА ПЕРЕВІРКА ХРЕСТИКІВ
-                const isBlocked = teacher.availability && teacher.availability[dIdx] && teacher.availability[dIdx][lIdx] === false;
+                // УНІВЕРСАЛЬНА ПЕРЕВІРКА:
+                // Якщо в розкладі пусто І (немає масиву availability АБО значення в ньому "falsy")
+                const isAvailable = teacher.availability && teacher.availability[dIdx] && (teacher.availability[dIdx][lIdx] === true || teacher.availability[dIdx][lIdx] === 1);
+                const isBlocked = !isAvailable; 
+
                 const displayValue = cellContent || (isBlocked ? '✕' : '');
                 const clsName = cellContent ? 'lesson-active' : (isBlocked ? 'cell-blocked' : '');
                 
