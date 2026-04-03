@@ -430,7 +430,6 @@ function printSchedule() {
     const printWindow = window.open('', '_blank');
     const dateStr = new Date().toLocaleDateString('uk-UA');
 
-    // Формуємо шапку (Прізвища скорочені + вертикальні)
     const teacherHeaders = state.teachers.map(t => {
         const p = t.name.split(' ');
         const shortName = p[0] + (p[1] ? ` ${p[1][0]}.` : '') + (p[2] ? `${p[2][0]}.` : '');
@@ -451,15 +450,19 @@ function printSchedule() {
                 state.classes.forEach(cls => {
                     const lesson = state.schedule[cls.id] ? state.schedule[cls.id][dIdx][lIdx] : null;
                     if (lesson && lesson.teacherId === teacher.id) {
-                        // ЛОГІКА: Беремо тільки першу цифру (напр. "7" з "7 клас")
                         const match = cls.name.match(/\d+/);
                         cellContent = match ? match[0] : cls.name;
                     }
                 });
                 
+                // Перевірка доступності (хрестики)
                 const isBlocked = teacher.availability && !teacher.availability[dIdx][lIdx];
                 const clsName = cellContent ? 'lesson-active' : (isBlocked ? 'cell-blocked' : '');
-                row += `<td class="content-cell ${clsName}">${cellContent || (isBlocked ? '✕' : '')}</td>`;
+                
+                // Додаємо ✕ тільки якщо вчитель недоступний і там немає уроку
+                const displayValue = cellContent || (isBlocked ? '✕' : '');
+                
+                row += `<td class="content-cell ${clsName}">${displayValue}</td>`;
             });
             row += `</tr>`;
             bodyRows += row;
@@ -473,63 +476,67 @@ function printSchedule() {
             <title>Розклад ${dateStr}</title>
             <style>
                 @media print { 
-                    @page { size: A4 landscape; margin: 2mm; } 
+                    @page { size: A4 landscape; margin: 3mm; } 
                     body { -webkit-print-color-adjust: exact; }
                 }
-                body { font-family: "Arial Narrow", Arial, sans-serif; margin: 0; padding: 5px; }
+                body { font-family: "Arial Narrow", Arial, sans-serif; margin: 0; padding: 5px; background: white; }
                 
-                /* ПРИМУСОВА ШИРИНА ТАБЛИЦІ */
+                /* ЗАФІКСОВАНА ШИРИНА ТАБЛИЦІ (прибираємо 100%) */
                 table { 
                     border-collapse: collapse; 
-                    width: 100%; 
-                    table-layout: fixed; /* Це не дасть колонкам розповзатися */
+                    table-layout: fixed; 
                     border: 1.5px solid #000; 
+                    width: auto; /* Тепер таблиця не розтягується на всю сторінку */
+                    margin: 0;
                 }
                 
-                /* ПЕРШІ ДВІ КОЛОНКИ - ТЕПЕР ТОЧНО ВУЗЬКІ */
-                .day-cell { width: 20px !important; background: #f0f0f0; border: 1px solid #000; }
-                .num-cell { width: 18px !important; font-weight: bold; border: 1px solid #000; font-size: 10px; }
+                /* КОНТРОЛЬ ШИРИНИ ПЕРШИХ КОЛОНОК */
+                .day-cell { width: 22px !important; background: #f0f0f0 !important; border: 1px solid #000; }
+                .num-cell { width: 18px !important; font-weight: bold; border: 1px solid #000; font-size: 10px; background: white !important; }
                 
                 /* КОЛОНКИ ВЧИТЕЛІВ */
                 .t-col { 
                     width: 25px !important; 
-                    height: 95px; 
+                    height: 100px; 
                     position: relative; 
                     border: 1px solid #000; 
-                    background: #fff;
+                    background: white !important;
+                    vertical-align: bottom;
                 }
                 
-                /* ФІКС ПРІЗВИЩ: ПРИТИСКАЄМО ДО НИЗУ */
+                /* ЦЕНТРУВАННЯ ПРІЗВИЩ */
                 .t-rotate { 
                     position: absolute; 
-                    bottom: 5px; 
-                    left: 50%; 
-                    width: 100%;
-                    height: 0;
+                    bottom: 0; 
+                    left: 0;
+                    right: 0;
+                    height: 100px;
                 }
                 .t-rotate span { 
                     transform: rotate(-90deg); 
-                    transform-origin: left center; 
+                    transform-origin: left bottom; 
                     white-space: nowrap; 
                     display: block; 
                     font-weight: bold; 
                     font-size: 10px;
-                    width: 85px;
-                    text-align: left;
                     position: absolute;
-                    left: 50%;
-                    bottom: 0;
+                    bottom: 5px; /* Відступ від сітки */
+                    left: 55%; /* Центрування по горизонталі вузької колонки */
+                    width: 100px;
+                    text-align: left;
                 }
 
                 .day-rotate { transform: rotate(-90deg); white-space: nowrap; text-transform: uppercase; font-size: 8px; font-weight: bold; }
                 
-                td { border: 1px solid #000; text-align: center; height: 18px; font-size: 11px; padding: 0 !important; }
+                td { border: 1px solid #000; text-align: center; height: 18px; font-size: 11px; padding: 0 !important; overflow: hidden; }
                 
-                .lesson-active { background-color: #f1f5f9 !important; font-weight: 900; }
-                .cell-blocked { background-color: #fafafa; color: #ddd; font-size: 8px; }
-                .day-divider { height: 2px; background: #000; }
+                .lesson-active { background-color: #f1f5f9 !important; font-weight: 900; -webkit-print-color-adjust: exact; }
+                .cell-blocked { color: #ccc !important; font-size: 9px; }
                 
-                h2 { text-align: center; font-size: 14px; margin: 0 0 5px 0; }
+                .day-divider { height: 2px; background: #000 !important; }
+                .day-divider td { border: none; height: 2px; }
+                
+                h2 { font-size: 14px; margin: 0 0 5px 5px; text-align: left; }
             </style>
         </head>
         <body>
@@ -537,7 +544,7 @@ function printSchedule() {
             <table>
                 <thead>
                     <tr>
-                        <th colspan="2" style="height:20px; font-size:9px; border:1px solid #000;">ДН/№</th>
+                        <th colspan="2" style="width: 40px; height:20px; font-size:9px; border:1px solid #000;">ДН/№</th>
                         ${teacherHeaders}
                     </tr>
                 </thead>
