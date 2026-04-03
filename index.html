@@ -85,8 +85,8 @@
                     <button onclick="generateSchedule()" class="bg-green-600 text-white px-6 py-2 rounded-lg font-bold hover:bg-green-700 shadow-lg shadow-green-200">
                         Запустити генерацію
                     </button>
-                    <button onclick="printSchedule()" class="bg-slate-700 text-white px-6 py-2 rounded-lg font-bold hover:bg-slate-800 shadow-lg flex items-center gap-2">
-                        <span>🖨️ Друк</span>
+                    <button onclick="if(typeof printSchedule === 'function') printSchedule(); else alert('Зачекайте, код ще завантажується або містить помилку!')" class="bg-slate-700 text-white px-6 py-2 rounded-lg font-bold hover:bg-slate-800 shadow-lg flex items-center gap-2">
+                        <span>🖨️ На друк</span>
                     </button>
                 </div>
             </div>
