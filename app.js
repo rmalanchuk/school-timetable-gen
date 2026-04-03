@@ -28,9 +28,17 @@ function save() {
 function showTab(tabName) {
     state.activeTab = tabName;
     
-    // Оновлення UI табів
-    document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
-    document.getElementById(`tab-${tabName}`).classList.remove('hidden');
+    // Ховаємо весь контент
+    document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+    // Показуємо потрібний
+    const activeSection = document.getElementById(`tab-${tabName}`);
+    if (activeSection) activeSection.classList.add('active');
+    
+    // Оновлюємо стилі кнопок
+    document.querySelectorAll('.nav-btn').forEach(btn => {
+        btn.classList.remove('active');
+        if (btn.id === `btn-${tabName}`) btn.classList.add('active');
+    });
     
     save();
     renderAll();
