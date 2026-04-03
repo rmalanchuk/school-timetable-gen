@@ -234,15 +234,19 @@ function renderSchedule() {
     }
 
     let html = `
-        <div class="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
-            <div class="overflow-x-auto">
-                <table class="w-full border-collapse text-[11px] table-fixed min-w-[800px]">
+        <div class="relative bg-white rounded-xl shadow-2xl border border-slate-200 overflow-hidden">
+            <div class="overflow-x-auto overflow-y-auto max-h-[80vh]">
+                <table class="w-full border-separate border-spacing-0 text-[11px]">
                     <thead>
-                        <tr class="bg-slate-800 text-white">
-                            <th class="border border-slate-700 p-2 w-20 sticky left-0 z-20 bg-slate-800">День / №</th>
+                        <tr>
+                            <th class="sticky left-0 top-0 z-40 bg-slate-800 text-white border-r border-b border-slate-700 p-2 w-16 min-w-[64px]">
+                                День / №
+                            </th>
                             ${state.teachers.map(t => `
-                                <th class="border border-slate-700 p-2 text-center min-w-[100px]">
-                                    ${t.name}
+                                <th class="sticky top-0 z-30 bg-slate-800 text-white border-r border-b border-slate-700 p-2 min-w-[100px] max-w-[100px] vertical-align-top text-center leading-tight h-16">
+                                    <div class="line-clamp-3 break-words whitespace-normal px-1">
+                                        ${t.name}
+                                    </div>
                                 </th>
                             `).join('')}
                         </tr>
@@ -250,24 +254,30 @@ function renderSchedule() {
                     <tbody>
     `;
 
-    // Цикл по днях
     state.config.days.forEach((day, dIdx) => {
-        // Цикл по уроках (рядки)
         for (let lIdx = 0; lIdx < state.config.maxLessons; lIdx++) {
+            const isLastLesson = lIdx === state.config.maxLessons - 1;
+            const dayBorder = isLastLesson ? 'border-b-4 border-b-slate-400' : 'border-b border-slate-200';
+
             html += `<tr class="hover:bg-slate-50 transition-colors">`;
             
-            // Перша колонка: День та номер уроку
+            // Фіксована ліва колонка (День + Номер)
             if (lIdx === 0) {
                 html += `
-                    <td rowspan="${state.config.maxLessons}" class="border border-slate-300 bg-slate-100 p-2 font-bold text-slate-700 sticky left-0 z-10 text-center align-middle border-b-4 border-b-slate-400">
-                        <div class="rotate-180 [writing-mode:vertical-lr] inline-block mb-1 uppercase tracking-widest text-[10px]">${day}</div>
+                    <td rowspan="${state.config.maxLessons}" class="sticky left-0 z-20 bg-slate-100 border-r border-slate-300 font-bold text-slate-700 text-center align-middle ${dayBorder}">
+                         <div class="rotate-180 [writing-mode:vertical-lr] py-2 uppercase tracking-tighter text-[9px]">
+                            ${day}
+                         </div>
                     </td>
                 `;
             }
 
-            // Колонки для кожного вчителя
+            // Окремий стовпчик для номера уроку (теж фіксований поруч з днем, якщо потрібно, але поки об'єднаємо для економії)
+            // Додаємо номер уроку в кожному рядку, але він має бути sticky поруч з днем
+            // Щоб не ускладнювати, зробимо номер уроку частиною комірки вчителя або окремою тонкою колонкою
+            // Давай додамо номер уроку як маленьку sticky колонку:
+
             state.teachers.forEach(teacher => {
-                // Шукаємо урок вчителя у всіх класах
                 let assignedClass = "";
                 state.classes.forEach(cls => {
                     const lesson = state.schedule[cls.id] ? state.schedule[cls.id][dIdx][lIdx] : null;
@@ -277,16 +287,16 @@ function renderSchedule() {
                 });
 
                 const isBlocked = teacher.availability && !teacher.availability[dIdx][lIdx];
-                let cellClass = isBlocked ? 'bg-gray-100 text-gray-400' : '';
-                if (assignedClass) cellClass = 'bg-indigo-600 text-white font-bold shadow-inner';
-                
-                // Додаємо жирну лінію знизу, якщо це останній урок дня
-                const isLastLesson = lIdx === state.config.maxLessons - 1;
-                const borderBottom = isLastLesson ? 'border-b-4 border-b-slate-300' : '';
+                let cellStyle = isBlocked ? 'bg-slate-100 text-slate-300' : '';
+                if (assignedClass) cellStyle = 'bg-blue-600 text-white font-black shadow-[inset_0_0_10px_rgba(0,0,0,0.1)]';
+
+                // Додаємо індикатор номера уроку для зручності в кожну 5-ту клітинку або на початку
+                const lessonIndicator = `<span class="absolute top-0.5 left-0.5 text-[8px] opacity-30">${lIdx + 1}</span>`;
 
                 html += `
-                    <td class="border p-1 text-center h-10 ${cellClass} ${borderBottom}">
-                        ${assignedClass || (isBlocked ? '✕' : '')}
+                    <td class="relative border-r border-slate-200 p-1 text-center h-12 min-w-[100px] max-w-[100px] ${cellStyle} ${dayBorder}">
+                        ${lessonIndicator}
+                        <span class="block truncate">${assignedClass || (isBlocked ? '✕' : '')}</span>
                     </td>
                 `;
             });
@@ -300,17 +310,16 @@ function renderSchedule() {
                 </table>
             </div>
         </div>
-        <div class="mt-6 flex flex-wrap gap-6 text-xs p-4 bg-white rounded-lg shadow-sm border">
-            <div class="flex items-center gap-2"><span class="w-4 h-4 bg-indigo-600 rounded"></span> <span class="font-bold text-slate-700">Проведений урок (Клас)</span></div>
-            <div class="flex items-center gap-2"><span class="w-4 h-4 bg-gray-100 border text-gray-400 flex items-center justify-center text-[10px]">✕</span> <span class="text-slate-500 font-medium">Недоступно (Метод. день тощо)</span></div>
-            <div class="flex items-center gap-2"><span class="w-4 h-4 border border-slate-200"></span> <span class="text-slate-500 font-medium">Вільна година (Вікно)</span></div>
+        <div class="mt-4 p-4 bg-slate-50 rounded-lg flex flex-wrap gap-4 text-[10px] text-slate-600">
+            <div class="flex items-center gap-1"><div class="w-3 h-3 bg-blue-600 rounded"></div> Урок призначено</div>
+            <div class="flex items-center gap-1"><div class="w-3 h-3 bg-slate-100 border text-slate-300 flex items-center justify-center text-[8px]">✕</div> Недоступно</div>
+            <div class="flex items-center gap-1 text-slate-400 italic">* Використовуйте Shift + коліщатко миші для горизонтального скролу</div>
         </div>
     `;
 
     container.innerHTML = html;
 }
 
-// ОНОВИ ЦЮ ФУНКЦІЮ у себе:
 function renderAll() {
     renderTeachers();
     renderClasses();
