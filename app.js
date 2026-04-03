@@ -93,6 +93,7 @@ function deleteClass(id) {
 function renderAll() {
     renderTeachers();
     renderClasses();
+    renderWorkload();
 }
 
 function renderTeachers() {
@@ -121,4 +122,70 @@ function renderClasses() {
     `).join('');
 }
 
+// --- Модуль Навантаження ---
+
+function renderWorkload() {
+    const container = document.getElementById('workload-container');
+    if (!container) return;
+
+    if (state.teachers.length === 0 || state.classes.length === 0) {
+        container.innerHTML = '<div class="p-10 text-center text-gray-400">Додайте вчителів та класи для формування матриці.</div>';
+        return;
+    }
+
+    let html = `
+        <table class="w-full border-collapse">
+            <thead>
+                <tr class="bg-slate-100 text-slate-700">
+                    <th class="border p-3 text-left">Вчитель</th>
+                    ${state.classes.map(c => `<th class="border p-3 text-center w-24">${c.name}</th>`).join('')}
+                </tr>
+            </thead>
+            <tbody>
+    `;
+
+    state.teachers.forEach(teacher => {
+        html += `
+            <tr class="hover:bg-blue-50 transition">
+                <td class="border p-3 font-semibold text-slate-800 bg-gray-50">${teacher.name}</td>
+                ${state.classes.map(cls => {
+                    const work = teacher.workload.find(w => w.classId === cls.id);
+                    const hours = work ? work.hours : '';
+                    return `
+                        <td class="border p-0">
+                            <input type="number" min="0" max="40" 
+                                value="${hours}" 
+                                onchange="updateWorkload('${teacher.id}', '${cls.id}', this.value)"
+                                placeholder="0"
+                                class="w-full text-center py-3 px-2 focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition appearance-none">
+                        </td>
+                    `;
+                }).join('')}
+            </tr>
+        `;
+    });
+
+    html += '</tbody></table>';
+    container.innerHTML = html;
+}
+
+function updateWorkload(teacherId, classId, value) {
+    const teacher = state.teachers.find(t => t.id === teacherId);
+    if (!teacher) return;
+
+    const hours = parseInt(value) || 0;
+    const workIndex = teacher.workload.findIndex(w => w.classId === classId);
+
+    if (workIndex > -1) {
+        if (hours === 0) teacher.workload.splice(workIndex, 1);
+        else teacher.workload[workIndex].hours = hours;
+    } else if (hours > 0) {
+        teacher.workload.push({ classId, hours });
+    }
+
+    save();
+    // Не викликаємо renderAll(), щоб не "стрибав" фокус з інпуту при введенні
+}
+
+// Ініціалізація
 window.onload = init;
