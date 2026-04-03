@@ -422,50 +422,191 @@ function updateWorkload(teacherId, classId, value) {
 
 // Ініціалізація
 
-function printSchedule() {
+-function printSchedule() {
     const printWindow = window.open('', '_blank');
-    const scheduleHtml = document.getElementById('schedule-output').innerHTML;
-    
-    // Отримуємо поточну дату для заголовку
-    const date = new Date().toLocaleDateString('uk-UA');
+    if (!state.schedule || !printWindow) return;
 
-    printWindow.document.write(`
-        <html>
-            <head>
-                <title>Розклад занять - ${date}</title>
-                <script src="https://cdn.tailwindcss.com"></script>
-                <style>
-                    @media print {
-                        @page { 
-                            size: A4 landscape; 
-                            margin: 10mm; 
-                        }
-                        body { -webkit-print-color-adjust: exact; }
-                    }
-                    table { table-layout: fixed; width: 100%; border-collapse: collapse; }
-                    th, td { border: 1px solid #000 !important; font-size: 9px !important; line-height: 1.1 !important; height: auto !important; }
-                    .sticky, button, .mt-4 { display: none !important; } /* Ховаємо зайве */
-                    th { background-color: #f1f5f9 !important; color: #000 !important; }
-                    .bg-blue-600 { background-color: #e0f2fe !important; color: #000 !important; font-weight: bold !important; }
-                    .bg-slate-800 { background-color: #f1f5f9 !important; color: #000 !important; }
-                </style>
-            </head>
-            <body class="p-4">
-                <div class="text-center mb-4">
-                    <h1 class="text-xl font-bold uppercase">Зведений розклад занять вчителів</h1>
-                    <p class="text-sm italic">Дата формування: ${date}</p>
+    // Підготовка даних для компактного заголовку вчителів
+    const teacherHeadersHtml = state.teachers.map(t => {
+        // Отримуємо Прізвище + Ініціали (напр., Маланчук Р.С.)
+        const parts = t.name.split(' ');
+        const lastName = parts[0] || '';
+        const initials = parts.slice(1).map(n => n[0] ? n[0] + '.' : '').join('');
+        const shortName = `${lastName} ${initials}`.trim();
+
+        return `
+            <th class="teacher-col">
+                <div class="rotated-text-wrapper">
+                    <span class="rotated-text">${shortName}</span>
                 </div>
-                ${scheduleHtml}
-            </body>
+            </th>
+        `;
+    }).join('');
+
+    // Генеруємо тіло таблиці (уроки)
+    let bodyHtml = '';
+    state.config.days.forEach((day, dIdx) => {
+        for (let lIdx = 0; lIdx < state.config.maxLessons; lIdx++) {
+            const isFirstLesson = lIdx === 0;
+            const isLastLesson = lIdx === state.config.maxLessons - 1;
+            
+            let rowHtml = `<tr>`;
+            
+            // Колонка "День" - тільки для першого уроку дня
+            if (isFirstLesson) {
+                bodyHtml += `
+                    <tr class="day-separator">
+                        <td colspan="${state.teachers.length + 2}" class="p-0 h-0 border-none"></td>
+                    </tr>
+                `;
+                rowHtml += `
+                    <td rowspan="${state.config.maxLessons}" class="day-col">
+                        <div class="rotated-day-wrapper">
+                            <span class="rotated-day">${day}</span>
+                        </div>
+                    </td>
+                `;
+            }
+
+            // Колонка "Номер уроку"
+            rowHtml += `<td class="lesson-num-col">${lIdx + 1}</td>`;
+
+            // Колонки вчителів з класами
+            state.teachers.forEach(teacher => {
+                let assignedClass = "";
+                state.classes.forEach(cls => {
+                    const lesson = state.schedule[cls.id] ? state.schedule[cls.id][dIdx][lIdx] : null;
+                    if (lesson && lesson.teacherId === teacher.id) {
+                        assignedClass = cls.name;
+                    }
+                });
+
+                const isBlocked = teacher.availability && !teacher.availability[dIdx][lIdx];
+                let cellClass = '';
+                if (assignedClass) cellClass = 'has-lesson';
+                if (isBlocked) cellClass = 'is-blocked';
+
+                rowHtml += `<td class="${cellClass}">${assignedClass || (isBlocked ? '✕' : '')}</td>`;
+            });
+
+            rowHtml += `</tr>`;
+            bodyHtml += rowHtml;
+        }
+    });
+
+    // Отримуємо дату для заголовку
+    const dateStr = new Date().toLocaleDateString('uk-UA');
+
+    // Формуємо фінальний документ для друку
+    printWindow.document.write(`
+        <!DOCTYPE html>
+        <html lang="uk">
+        <head>
+            <meta charset="UTF-8">
+            <title>Друк розкладу - ${dateStr}</title>
+            <style>
+                /* Глобальні налаштування для друку */
+                @media print {
+                    @page { 
+                        size: A4 landscape; 
+                        margin: 5mm; /* Мінімальні відступи */
+                    }
+                    body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+                }
+
+                body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; margin: 0; padding: 0; }
+                
+                /* Заголовок */
+                .print-header { text-align: center; margin-bottom: 5px; }
+                .print-header h1 { font-size: 14px; margin: 0; uppercase; }
+                .print-header p { font-size: 10px; margin: 2px 0; italic; color: #666; }
+
+                /* Таблиця */
+                table { table-layout: fixed; width: 100%; border-collapse: collapse; border: 2px solid #000; }
+                th, td { border: 1px solid #ccc; text-align: center; vertical-align: middle; padding: 0 !important; margin: 0 !important; box-sizing: border-box; }
+
+                /* Екстремальне звуження висоти рядків */
+                tr { height: 16px !important; }
+                td { font-size: 10px; height: 16px !important; line-height: 16px !important; }
+
+                /* Шапка таблиці */
+                thead tr.main-header { height: 80px !important; } /* Висота для вертикальних ПІБ */
+                th.corner-col { font-size: 9px; background-color: #f1f5f9; color: #475569; }
+                th.teacher-col { 
+                    width: 25px !important; /* Гіпер-вузькі стовпчики */
+                    min-w-[25px] !important;
+                    max-w-[25px] !important;
+                    background-color: #1e293b; color: #fff; 
+                    position: relative;
+                }
+
+                /* Магія вертикального тексту для ПІБ */
+                .rotated-text-wrapper {
+                    position: absolute; bottom: 5px; left: 50%;
+                    transform: translateX(-50%);
+                    width: 100%; height: 70px;
+                    display: flex; align-items: flex-end; justify-content: center;
+                }
+                .rotated-text {
+                    transform: rotate(-90deg);
+                    transform-origin: center center;
+                    white-space: nowrap;
+                    font-size: 9px; font-weight: bold;
+                    width: 70px; display: block; text-align: left;
+                }
+
+                /* Магія вертикального тексту для Днів */
+                td.day-col { 
+                    width: 20px !important; background-color: #f8fafc; font-weight: bold;
+                    border-bottom: 2px solid #94a3b8; border-right: 2px solid #94a3b8;
+                }
+                .rotated-day-wrapper {
+                    display: flex; align-items: center; justify-content: center; height: 100%; width: 100%;
+                }
+                .rotated-day {
+                    transform: rotate(-90deg); uppercase; font-size: 9px; tracking-widest; white-space: nowrap;
+                }
+
+                /* Колонка номера уроку */
+                td.lesson-num-col { width: 18px !important; background-color: #f1f5f9; font-weight: bold; font-size: 9px; color: #64748b; }
+
+                /* Стилізація клітинок з уроками */
+                td.has-lesson { background-color: #e0f2fe !important; font-weight: 900 !important; color: #000 !important; }
+                td.is-blocked { background-color: #f1f5f9 !important; color: #cbd5e1 !important; font-size: 8px; }
+
+                /* Роздільник днів */
+                tr.day-separator td { border-bottom: 2px solid #000 !important; height: 0 !important; }
+                
+                /* Щоб уникнути попливших рядків на друку */
+                tr { page-break-inside: avoid; }
+            </style>
+        </head>
+        <body>
+            <div class="print-header">
+                <h1>Зведений розклад занять вчителів</h1>
+                <p>Станом на ${dateStr}</p>
+            </div>
+            <table>
+                <thead>
+                    <tr class="main-header">
+                        <th class="corner-col" colspan="2">День / №</th>
+                        ${teacherHeadersHtml}
+                    </tr>
+                </thead>
+                <tbody>
+                    ${bodyHtml}
+                </tbody>
+            </table>
+        </body>
         </html>
     `);
 
     printWindow.document.close();
     
-    // Чекаємо завантаження Tailwind і викликаємо діалог друку
+    // Трохи чекаємо і викликаємо діалог друку
     setTimeout(() => {
         printWindow.print();
-    }, 500);
+        // printWindow.close(); // Можна розкоментувати, щоб вікно закривалося після друку
+    }, 250);
 }
-
 window.onload = init;
