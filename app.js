@@ -229,47 +229,85 @@ function renderSchedule() {
     if (!container) return;
 
     if (!state.schedule || Object.keys(state.schedule).length === 0) {
-        container.innerHTML = '<div class="p-10 text-center text-gray-400">Натисніть "Запустити генерацію", щоб створити розклад.</div>';
+        container.innerHTML = '<div class="p-10 text-center text-gray-400">Натисніть "Запустити генерацію", щоб отримати зведену таблицю.</div>';
         return;
     }
 
-    container.innerHTML = state.classes.map(cls => {
-        const classSched = state.schedule[cls.id];
-        if (!classSched) return '';
-
-        return `
-            <div class="bg-white rounded-xl shadow-sm border border-gray-200 mb-10 overflow-hidden">
-                <div class="bg-slate-50 border-b p-4">
-                    <h3 class="text-xl font-bold text-slate-800">Клас: ${cls.name}</h3>
-                </div>
-                <div class="overflow-x-auto">
-                    <table class="w-full border-collapse">
-                        <thead>
-                            <tr class="bg-slate-100">
-                                <th class="border p-2 w-12 text-xs uppercase text-slate-500">№</th>
-                                ${state.config.days.map(d => `<th class="border p-2 text-sm font-bold text-slate-700">${d}</th>`).join('')}
-                            </tr>
-                        </thead>
-                        <tbody>
-                            ${Array(state.config.maxLessons).fill().map((_, lIdx) => `
-                                <tr>
-                                    <td class="border p-2 text-center bg-slate-50 font-bold text-slate-400 text-xs">${lIdx + 1}</td>
-                                    ${[0, 1, 2, 3, 4].map(dIdx => {
-                                        const lesson = classSched[dIdx][lIdx];
-                                        return `
-                                            <td class="border p-2 text-center h-16 min-w-[120px] transition-colors ${lesson ? 'bg-blue-50' : ''}">
-                                                ${lesson ? `<div class="text-sm font-bold text-blue-900 leading-tight">${lesson.teacherName}</div>` : ''}
-                                            </td>
-                                        `;
-                                    }).join('')}
-                                </tr>
+    let html = `
+        <div class="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
+            <div class="overflow-x-auto">
+                <table class="w-full border-collapse text-[11px] table-fixed min-w-[800px]">
+                    <thead>
+                        <tr class="bg-slate-800 text-white">
+                            <th class="border border-slate-700 p-2 w-20 sticky left-0 z-20 bg-slate-800">День / №</th>
+                            ${state.teachers.map(t => `
+                                <th class="border border-slate-700 p-2 text-center min-w-[100px]">
+                                    ${t.name}
+                                </th>
                             `).join('')}
-                        </tbody>
-                    </table>
-                </div>
+                        </tr>
+                    </thead>
+                    <tbody>
+    `;
+
+    // Цикл по днях
+    state.config.days.forEach((day, dIdx) => {
+        // Цикл по уроках (рядки)
+        for (let lIdx = 0; lIdx < state.config.maxLessons; lIdx++) {
+            html += `<tr class="hover:bg-slate-50 transition-colors">`;
+            
+            // Перша колонка: День та номер уроку
+            if (lIdx === 0) {
+                html += `
+                    <td rowspan="${state.config.maxLessons}" class="border border-slate-300 bg-slate-100 p-2 font-bold text-slate-700 sticky left-0 z-10 text-center align-middle border-b-4 border-b-slate-400">
+                        <div class="rotate-180 [writing-mode:vertical-lr] inline-block mb-1 uppercase tracking-widest text-[10px]">${day}</div>
+                    </td>
+                `;
+            }
+
+            // Колонки для кожного вчителя
+            state.teachers.forEach(teacher => {
+                // Шукаємо урок вчителя у всіх класах
+                let assignedClass = "";
+                state.classes.forEach(cls => {
+                    const lesson = state.schedule[cls.id] ? state.schedule[cls.id][dIdx][lIdx] : null;
+                    if (lesson && lesson.teacherId === teacher.id) {
+                        assignedClass = cls.name;
+                    }
+                });
+
+                const isBlocked = teacher.availability && !teacher.availability[dIdx][lIdx];
+                let cellClass = isBlocked ? 'bg-gray-100 text-gray-400' : '';
+                if (assignedClass) cellClass = 'bg-indigo-600 text-white font-bold shadow-inner';
+                
+                // Додаємо жирну лінію знизу, якщо це останній урок дня
+                const isLastLesson = lIdx === state.config.maxLessons - 1;
+                const borderBottom = isLastLesson ? 'border-b-4 border-b-slate-300' : '';
+
+                html += `
+                    <td class="border p-1 text-center h-10 ${cellClass} ${borderBottom}">
+                        ${assignedClass || (isBlocked ? '✕' : '')}
+                    </td>
+                `;
+            });
+
+            html += `</tr>`;
+        }
+    });
+
+    html += `
+                    </tbody>
+                </table>
             </div>
-        `;
-    }).join('');
+        </div>
+        <div class="mt-6 flex flex-wrap gap-6 text-xs p-4 bg-white rounded-lg shadow-sm border">
+            <div class="flex items-center gap-2"><span class="w-4 h-4 bg-indigo-600 rounded"></span> <span class="font-bold text-slate-700">Проведений урок (Клас)</span></div>
+            <div class="flex items-center gap-2"><span class="w-4 h-4 bg-gray-100 border text-gray-400 flex items-center justify-center text-[10px]">✕</span> <span class="text-slate-500 font-medium">Недоступно (Метод. день тощо)</span></div>
+            <div class="flex items-center gap-2"><span class="w-4 h-4 border border-slate-200"></span> <span class="text-slate-500 font-medium">Вільна година (Вікно)</span></div>
+        </div>
+    `;
+
+    container.innerHTML = html;
 }
 
 // ОНОВИ ЦЮ ФУНКЦІЮ у себе:
