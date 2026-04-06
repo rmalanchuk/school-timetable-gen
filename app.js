@@ -246,7 +246,7 @@ function renderSchedule() {
     if (!container) return;
 
     if (!state.schedule || Object.keys(state.schedule).length === 0) {
-        container.innerHTML = '<div class="p-10 text-center text-gray-400">Натисніть "Запустити генерацію", щоб отримати зведену таблицю.</div>';
+        container.innerHTML = '<div class="p-10 text-center text-gray-400">Натисніть "Запустити генерацію", щоб отримати таблицю.</div>';
         return;
     }
 
@@ -256,14 +256,10 @@ function renderSchedule() {
                 <table class="w-full border-separate border-spacing-0 text-[11px]">
                     <thead>
                         <tr>
-                            <th class="sticky left-0 top-0 z-40 bg-slate-800 text-white border-r border-b border-slate-700 p-2 w-16 min-w-[64px]">
-                                День / №
-                            </th>
+                            <th class="sticky left-0 top-0 z-40 bg-slate-800 text-white border-r border-b border-slate-700 p-2 w-16 min-w-[64px]">День/№</th>
                             ${state.teachers.map(t => `
-                                <th class="sticky top-0 z-30 bg-slate-800 text-white border-r border-b border-slate-700 p-2 min-w-[100px] max-w-[100px] vertical-align-top text-center leading-tight h-16">
-                                    <div class="line-clamp-3 break-words whitespace-normal px-1">
-                                        ${t.name}
-                                    </div>
+                                <th class="sticky top-0 z-30 bg-slate-800 text-white border-r border-b border-slate-700 p-2 min-w-[100px] max-w-[100px] text-center leading-tight h-16">
+                                    <div class="line-clamp-2 break-words px-1">${t.name}</div>
                                 </th>
                             `).join('')}
                         </tr>
@@ -273,72 +269,50 @@ function renderSchedule() {
 
     state.config.days.forEach((day, dIdx) => {
         for (let lIdx = 0; lIdx < state.config.maxLessons; lIdx++) {
-            const isLastLesson = lIdx === state.config.maxLessons - 1;
-            const dayBorder = isLastLesson ? 'border-b-4 border-b-slate-400' : 'border-b border-slate-200';
-
+            const dayBorder = (lIdx === state.config.maxLessons - 1) ? 'border-b-4 border-b-slate-400' : 'border-b border-slate-200';
             html += `<tr class="hover:bg-slate-50 transition-colors">`;
             
-            // Фіксована ліва колонка (День + Номер)
             if (lIdx === 0) {
                 html += `
                     <td rowspan="${state.config.maxLessons}" class="sticky left-0 z-20 bg-slate-100 border-r border-slate-300 font-bold text-slate-700 text-center align-middle ${dayBorder}">
-                         <div class="rotate-180 [writing-mode:vertical-lr] py-2 uppercase tracking-tighter text-[9px]">
-                            ${day}
-                         </div>
+                        <div class="rotate-180 [writing-mode:vertical-lr] py-2 uppercase tracking-tighter text-[9px]">${day}</div>
                     </td>
                 `;
             }
 
-            // Окремий стовпчик для номера уроку (теж фіксований поруч з днем, якщо потрібно, але поки об'єднаємо для економії)
-            // Додаємо номер уроку в кожному рядку, але він має бути sticky поруч з днем
-            // Щоб не ускладнювати, зробимо номер уроку частиною комірки вчителя або окремою тонкою колонкою
-            // Давай додамо номер уроку як маленьку sticky колонку:
-
             state.teachers.forEach(teacher => {
-                let assignedClass = "";
+                let cellContent = "";
+                let subjectInfo = "";
+                
+                // Шукаємо, чи веде цей вчитель урок у будь-якому класі в цей час
                 state.classes.forEach(cls => {
                     const lesson = state.schedule[cls.id] ? state.schedule[cls.id][dIdx][lIdx] : null;
                     if (lesson && lesson.teacherId === teacher.id) {
-                        assignedClass = cls.name;
+                        const code = getSubjectCode(lesson.subject);
+                        cellContent = cls.name;
+                        subjectInfo = code;
                     }
                 });
 
-                const isBlocked = teacher.availability && !teacher.availability[dIdx][lIdx];
+                const isBlocked = teacher.availability && teacher.availability[dIdx] && !teacher.availability[dIdx][lIdx];
                 let cellStyle = isBlocked ? 'bg-slate-100 text-slate-300' : '';
-                if (assignedClass) cellStyle = 'bg-blue-600 text-white font-black shadow-[inset_0_0_10px_rgba(0,0,0,0.1)]';
-
-                // Додаємо індикатор номера уроку для зручності в кожну 5-ту клітинку або на початку
-                const lessonIndicator = `<span class="absolute top-0.5 left-0.5 text-[8px] opacity-30">${lIdx + 1}</span>`;
+                if (cellContent) cellStyle = 'bg-blue-600 text-white font-bold';
 
                 html += `
                     <td class="relative border-r border-slate-200 p-1 text-center h-12 min-w-[100px] max-w-[100px] ${cellStyle} ${dayBorder}">
-                        ${lessonIndicator}
-                        // Шукаємо урок для конкретного вчителя, щоб дістати назву предмета
-                        const lesson = state.schedule[cls.id] ? state.schedule[cls.id][dIdx][lIdx] : null;
-                        if (lesson && lesson.teacherId === teacher.id) {
-                            const subjectCode = getSubjectCode(lesson.subject);
-                            assignedClass = `${cls.name} (${subjectCode})`; // Виведе "7-А (АЛ)" або "10-Б (УМ)"
-                        }
+                        <span class="absolute top-0.5 left-0.5 text-[8px] opacity-30">${lIdx + 1}</span>
+                        <div class="leading-tight">
+                            <div class="text-[11px]">${cellContent}</div>
+                            <div class="text-[9px] font-normal opacity-90">${subjectInfo}</div>
+                        </div>
                     </td>
                 `;
             });
-
             html += `</tr>`;
         }
     });
 
-    html += `
-                    </tbody>
-                </table>
-            </div>
-        </div>
-        <div class="mt-4 p-4 bg-slate-50 rounded-lg flex flex-wrap gap-4 text-[10px] text-slate-600">
-            <div class="flex items-center gap-1"><div class="w-3 h-3 bg-blue-600 rounded"></div> Урок призначено</div>
-            <div class="flex items-center gap-1"><div class="w-3 h-3 bg-slate-100 border text-slate-300 flex items-center justify-center text-[8px]">✕</div> Недоступно</div>
-            <div class="flex items-center gap-1 text-slate-400 italic">* Використовуйте Shift + коліщатко миші для горизонтального скролу</div>
-        </div>
-    `;
-
+    html += `</tbody></table></div></div>`;
     container.innerHTML = html;
 }
 
@@ -616,14 +590,11 @@ function printSchedule() {
 function getSubjectCode(subject) {
     if (!subject) return "";
     const words = subject.trim().split(/\s+/);
-    
     if (words.length >= 2) {
-        // Якщо назва з двох слів (Укр мова -> УМ, Інформаційні технології -> ІТ)
+        // Укр мова -> УМ, Фіз вих -> ФВ
         return (words[0][0] + words[1][0]).toUpperCase();
     }
-    
-    // Якщо одне слово, беремо перші дві літери (Фізика -> ФІ, Алгебра -> АЛ)
-    // Або можна взяти 3 літери для кращої читаємості (Алг., Гео., Фіз.)
+    // Алгебра -> АЛ, Фізика -> ФІ
     return subject.substring(0, 2).toUpperCase();
 }
 
