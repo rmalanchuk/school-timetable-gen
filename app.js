@@ -571,112 +571,89 @@ function renderSchedule() {
 
 // --- ВІЗУАЛІЗАЦІЯ ТА ДРУК ---
 function printSchedule() {
-    if (!state.schedule || Object.keys(state.schedule).length === 0) {
-        alert("Спочатку згенеруйте розклад!");
+    // 1. Перевіряємо, чи є взагалі що друкувати
+    if (!state.schedule || state.schedule.length === 0) {
+        alert("Розклад порожній! Спочатку згенеруйте його.");
         return;
     }
 
+    // 2. Створюємо нове вікно для друку
     const printWindow = window.open('', '_blank');
+    const daysNames = ["ПОНЕДІЛОК", "ВІВТОРОК", "СЕРЕДА", "ЧЕТВЕР", "П'ЯТНИЦЯ"];
     const dateStr = new Date().toLocaleDateString('uk-UA');
 
-    // Прізвище першим + Ініціали
-    const teacherHeaders = state.teachers.map(t => {
-        const p = t.name.split(' ');
-        const shortName = p[0] + (p[1] ? ` ${p[1][0]}.` : '') + (p[2] ? `${p[2][0]}.` : '');
-        return `<th class="t-col"><div class="t-rotate"><span>${shortName}</span></div></th>`;
-    }).join('');
-
-    let bodyRows = '';
-    state.config.days.forEach((day, dIdx) => {
-        for (let lIdx = 0; lIdx < state.config.maxLessons; lIdx++) {
-            let row = `<tr class="l-row">`;
-            if (lIdx === 0) {
-                row += `<td rowspan="${state.config.maxLessons}" class="day-cell"><div class="day-rotate">${day}</div></td>`;
-            }
-            row += `<td class="num-cell">${lIdx + 1}</td>`;
-
-            state.teachers.forEach(teacher => {
-                let cellContent = "";
-                state.classes.forEach(cls => {
-                    const lesson = state.schedule[cls.id] ? state.schedule[cls.id][dIdx][lIdx] : null;
-                    if (lesson && lesson.teacherId === teacher.id) {
-                        const shortCls = cls.name.replace(/клас|класу/gi, '').trim();
-                        const subCode = getSubjectCode(lesson.subject);
-                        cellContent = `${shortCls}${subCode}`; // Виведе "7А-АЛ"
-                    }
-                });
-                
-                // МАКСИМАЛЬНО СУВОРА ПЕРЕВІРКА
-                // Клітинка вважається заблокованою (isBlocked), якщо там немає уроку 
-                // І в налаштуваннях вчителя на цей час НЕ стоїть чітке "true"
-                let isBlocked = false;
-                if (!cellContent) {
-                    if (teacher.availability && teacher.availability[dIdx]) {
-                        const val = teacher.availability[dIdx][lIdx];
-                        // Якщо там false, 0, null або undefined — ставимо хрестик
-                        if (val !== true && val !== 1) {
-                            isBlocked = true;
-                        }
-                    } else {
-                        // Якщо даних про доступність взагалі немає для цього дня — теж ставимо хрестик
-                        isBlocked = true;
-                    }
-                }
-
-                const displayValue = cellContent || '';
-                const clsName = cellContent ? 'lesson-active' : (isBlocked ? 'cell-blocked' : '');
-                
-                row += `<td class="content-cell ${clsName}">${displayValue}</td>`;
-            });
-            row += `</tr>`;
-            bodyRows += row;
-        }
-        bodyRows += `<tr class="day-divider"><td colspan="${state.teachers.length + 2}"></td></tr>`;
-    });
-
-    printWindow.document.write(`
+    let html = `
         <html>
         <head>
-            <title>Розклад - ${dateStr}</title>
+            <title>Друк розкладу</title>
             <style>
-                @media print { 
-                    @page { size: A4 portrait; margin: 3mm; } 
-                    body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+                body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 20px; }
+                h2 { text-align: center; text-transform: uppercase; font-size: 14px; margin-bottom: 10px; }
+                table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+                th, td { border: 1px solid black; padding: 4px; text-align: center; font-size: 10px; height: 25px; overflow: hidden; }
+                th { background-color: #f2f2f2; }
+                .day-cell { font-weight: bold; writing-mode: vertical-lr; transform: rotate(180deg); width: 30px; background: #fafafa; }
+                .slot-num { width: 30px; color: #666; }
+                @media print {
+                    .no-print { display: none; }
+                    body { padding: 0; }
                 }
-                body { font-family: "Arial Narrow", Arial, sans-serif; margin: 0; padding: 0; background: white; }
-                table { border-collapse: collapse; width: 100%; table-layout: fixed; border: 2px solid black !important; }
-                th, td { border: 1px solid black !important; text-align: center; padding: 0 !important; }
-                .day-cell { width: 20px !important; background: #f0f0f0 !important; font-weight: bold; }
-                .num-cell { width: 18px !important; font-weight: bold; font-size: 9px; }
-                .t-col { height: 90px; position: relative; }
-                .t-rotate { position: absolute; bottom: 0; left: 0; right: 0; height: 90px; }
-                .t-rotate span { 
-                    transform: rotate(-90deg); transform-origin: left bottom; 
-                    white-space: nowrap; display: block; font-weight: bold; font-size: 9px;
-                    position: absolute; bottom: 3px; left: 55%; width: 85px; text-align: left;
-                }
-                .day-rotate { transform: rotate(-90deg); white-space: nowrap; text-transform: uppercase; font-size: 8px; font-weight: bold; }
-                tr.l-row { height: 18px; }
-                .content-cell { font-size: 10px; height: 18px; }
-                .lesson-active { background-color: #f1f5f9 !important; font-weight: 900; }
-                .cell-blocked { color: #aaa !important; font-size: 9px; font-weight: normal; }
-                .day-divider { height: 2px; background: black !important; }
-                h2 { font-size: 12px; margin: 5px; text-align: center; text-transform: uppercase; }
             </style>
         </head>
         <body>
-            <h2>ЗВЕДЕНИЙ РОЗКЛАД (на ${dateStr})</h2>
+            <h2>ЗВЕДЕНИЙ РОЗКЛАД (НА ${dateStr})</h2>
             <table>
                 <thead>
-                    <tr><th colspan="2" style="height:20px; font-size:8px;">ДН/№</th>${teacherHeaders}</tr>
+                    <tr>
+                        <th colspan="2">ДН/№</th>
+                        ${state.teachers.map(t => `<th>${t.name}</th>`).join('')}
+                    </tr>
                 </thead>
-                <tbody>${bodyRows}</tbody>
+                <tbody>
+    `;
+
+    daysNames.forEach((dayName, dayIdx) => {
+        for (let slotIdx = 0; slotIdx < 8; slotIdx++) {
+            html += `<tr>`;
+            
+            // Назва дня (тільки для першого слота дня)
+            if (slotIdx === 0) {
+                html += `<td rowspan="8" class="day-cell">${dayName}</td>`;
+            }
+            
+            // Номер уроку
+            html += `<td class="slot-num">${slotIdx + 1}</td>`;
+
+            // Уроки вчителів
+            state.teachers.forEach(teacher => {
+                const lesson = state.schedule.find(s => s.day === dayIdx && s.slot === slotIdx && s.teacherId == teacher.id);
+                
+                if (lesson) {
+                    const cls = state.classes.find(c => c.id == lesson.classId)?.name || '';
+                    // Використовуємо ту саму функцію скорочення назв
+                    const code = typeof getSubjectCode === 'function' ? getSubjectCode(lesson.subject) : lesson.subject;
+                    html += `<td><strong>${cls}${code}</strong></td>`;
+                } else {
+                    html += `<td></td>`;
+                }
+            });
+            
+            html += `</tr>`;
+        }
+    });
+
+    html += `
+                </tbody>
             </table>
+            <script>
+                window.onload = function() { window.print(); window.close(); };
+            </script>
         </body>
         </html>
-    `);
+    `;
+
+    printWindow.document.write(html);
     printWindow.document.close();
-    setTimeout(() => { printWindow.print(); }, 500);
 }
 
 function getSubjectCode(subject) {
