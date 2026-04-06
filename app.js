@@ -651,12 +651,12 @@ function printSchedule() {
                 @page { size: A4 portrait; margin: 5mm; }
                 body { font-family: 'Segoe UI', Arial, sans-serif; margin: 0; padding: 0; }
                 
-                /* Основна таблиця: жирний зовнішній контур */
                 table { 
                     width: 100%; 
                     border-collapse: collapse; 
                     table-layout: fixed; 
-                    border: 2.5pt solid #000; 
+                    /* Головна зовнішня рамка */
+                    border: 2.5pt solid #000;
                 }
                 
                 th, td { 
@@ -668,18 +668,19 @@ function printSchedule() {
                     vertical-align: middle; 
                 }
 
-                /* 1. ВИПРАВЛЕННЯ НАКЛАДАННЯ ЗВЕРХУ: жирна лінія тільки знизу thead */
+                /* ЖИРНА ЛІНІЯ ПІД ХЕДЕРОМ */
                 thead th { 
                     border-bottom: 2.5pt solid #000 !important;
-                    border-top: none; 
                 }
                 
-                /* 2. ВИПРАВЛЕННЯ ЛІВОЇ МЕЖІ: форсуємо товщину для перших колонок */
-                td:first-child, th:first-child { 
-                    border-left: none; 
-                }
+                /* Усуваємо тонкі лінії зліва у перших колонок, щоб вони не перекривали жирну рамку таблиці */
+                th:first-child, td:first-child { border-left: none; }
+                /* Те саме справа */
+                th:last-child, td:last-child { border-right: none; }
+                /* Те саме знизу */
+                tr:last-child td { border-bottom: none; }
 
-                /* КЛАС ДЛЯ ЖИРНОЇ ЛІНІЇ МІЖ ДНЯМИ */
+                /* ЖИРНІ РОЗДІЛЬНИКИ МІЖ ДНЯМИ (нижня межа останнього рядка дня) */
                 .day-end-row td { 
                     border-bottom: 2.5pt solid #000 !important; 
                 }
@@ -694,8 +695,6 @@ function printSchedule() {
                     font-size: 9px; 
                     width: 18px; 
                     background-color: #f1f5f9 !important;
-                    /* Важливо для лівої межі */
-                    border-left: none !important;
                 }
 
                 th.teacher-name { 
@@ -734,6 +733,7 @@ function printSchedule() {
         const totalRowsForDay = 9 - startSlot;
 
         for (let slotIdx = startSlot; slotIdx <= 8; slotIdx++) {
+            // Клас для останнього рядка кожного дня (крім останнього дня тижня, де межа — це рамка таблиці)
             const isLastRowOfDay = (slotIdx === 8);
             const needsSeparator = (isLastRowOfDay && dayIdx < 4);
             const rowClass = needsSeparator ? 'class="day-end-row"' : '';
