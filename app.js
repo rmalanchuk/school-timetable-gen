@@ -672,14 +672,16 @@ function printSchedule() {
                 @page { size: A4 portrait; margin: 5mm; }
                 body { font-family: 'Segoe UI', Arial, sans-serif; margin: 0; padding: 0; }
                 table { width: 100%; border-collapse: collapse; table-layout: fixed; border: 1.2pt solid #000; }
-                th, td { border: 1pt solid #000; text-align: center; padding: 0; box-sizing: border-box; }
-            
-                /* Ліва частина (ДН/№ та номери) — залишаємо як ти просив */
-                .corner-cell { font-size: 6px !important; line-height: 1; width: 18px; padding: 1px !important; }
-                .col-num { width: 16px; font-size: 7px !important; color: #444; height: 18px; }
+                
+                /* Висота клітинки 20px для комфортного розміщення тексту */
+                th, td { border: 1pt solid #000; text-align: center; padding: 0; box-sizing: border-box; height: 20px; vertical-align: middle; }
+
+                /* ТЕКСТ ЗЛІВА (ДН ТА НОМЕРИ) */
+                .corner-cell { font-size: 7px !important; font-weight: bold; width: 18px; }
+                .col-num { width: 16px; font-size: 8px !important; color: #333; }
                 .day-cell { font-weight: bold; writing-mode: vertical-lr; transform: rotate(180deg); font-size: 9px; width: 18px; background-color: #f1f5f9 !important; }
-            
-                /* Прізвища вчителів */
+
+                /* ПРІЗВИЩА ВЧИТЕЛІВ */
                 th.teacher-name {
                     height: 110px;
                     writing-mode: vertical-lr;
@@ -691,25 +693,27 @@ function printSchedule() {
                     padding: 5px 2px;
                     background-color: #f8fafc !important;
                 }
-            
-                /* УРОКИ — ВИПРАВЛЕННЯ НАПОЛЗАННЯ */
+
+                /* УРОКИ — ЦЕНТРУВАННЯ БЕЗ НАПОЛЗАННЯ */
                 .lesson-box { 
-                    padding: 2px 0; /* Відступи від верхньої та нижньої межі клітинки */
-                    line-height: 1.1; 
+                    display: block;
+                    width: 100%;
+                    line-height: 1; /* Скидаємо зайві відступи */
                 }
                 
                 .class-name { 
-                    font-size: 10px !important; 
+                    font-size: 9px !important; 
                     font-weight: 800; 
-                    display: block; /* Клас на окремому рядку */
+                    display: block;
+                    margin-top: 1px;
                 }
                 
                 .sub-code { 
-                    font-size: 7.5px !important; 
+                    font-size: 6.5px !important; 
                     font-weight: 400; 
                     text-transform: lowercase; 
-                    display: block; /* Предмет під класом */
-                    margin-top: 1px;
+                    display: block;
+                    margin-bottom: 1px;
                 }
             </style>
         </head>
@@ -718,8 +722,7 @@ function printSchedule() {
             <table>
                 <thead>
                     <tr>
-                        <th class="corner-cell">ДН/№</th>
-                        <th class="col-num">№</th>
+                        <th class="corner-cell">ДН</th> <th class="col-num">№</th>
                         ${state.teachers.map(t => `<th class="teacher-name">${formatName(t.name)}</th>`).join('')}
                     </tr>
                 </thead>
@@ -738,7 +741,6 @@ function printSchedule() {
                     const clsName = state.classes.find(c => c.id == lesson.classId)?.name || '';
                     const rawCode = typeof getSubjectCode === 'function' ? getSubjectCode(lesson.subject) : lesson.subject;
                     
-                    // ОСЬ ТУТ ЦЯ ЗМІНА ЛОГІКИ: розділяємо на два <span>
                     html += `<td>
                         <div class="lesson-box">
                             <span class="class-name">${clsName}</span>
@@ -753,7 +755,10 @@ function printSchedule() {
         }
     });
 
-    html += `</tbody></table><script>window.onload = function() { setTimeout(() => { window.print(); window.close(); }, 300); };</script></body></html>`;
+    html += `</tbody></table>
+    <script>window.onload = function() { setTimeout(() => { window.print(); window.close(); }, 300); };</script>
+    </body></html>`;
+    
     printWindow.document.write(html);
     printWindow.document.close();
 }
