@@ -660,6 +660,11 @@ function printSchedule() {
                 .class-name { font-size: 9px !important; font-weight: 800; display: block; margin-top: 1px; }
                 .sub-code { font-size: 6.5px !important; font-weight: 400; text-transform: lowercase; display: block; margin-bottom: 1px; }
                 .slot-0 { background-color: #fffaf0 !important; }
+                
+                /* Жирна лінія між днями */
+                .day-boundary td, .day-boundary th { 
+                    border-top: 2.5pt solid #000 !important; 
+                }
             </style>
         </head>
         <body>
@@ -675,15 +680,17 @@ function printSchedule() {
     `;
 
     daysNames.forEach((dayName, dayIdx) => {
-        // ПЕРЕВІРКА: чи є нульовий урок САМЕ В ЦЕЙ ДЕНЬ
         const dayHasZeroSlot = state.schedule.some(s => s.day === dayIdx && s.slot === 0);
         const startSlot = dayHasZeroSlot ? 0 : 1;
-        const totalRowsForDay = 9 - startSlot; // Кількість рядків, яку займе день (8 або 9)
+        const totalRowsForDay = 9 - startSlot;
 
         for (let slotIdx = startSlot; slotIdx <= 8; slotIdx++) {
-            html += `<tr>`;
+            // Визначаємо, чи це початок дня (крім самого першого дня таблиці), щоб дати жирну лінію
+            const isNewDay = (slotIdx === startSlot && dayIdx > 0);
+            const rowClass = isNewDay ? 'class="day-boundary"' : '';
+
+            html += `<tr ${rowClass}>`;
             
-            // Малюємо назву дня лише в першому слоті цього дня (0 або 1)
             if (slotIdx === startSlot) {
                 html += `<td rowspan="${totalRowsForDay}" class="day-cell">${dayName}</td>`;
             }
@@ -702,7 +709,6 @@ function printSchedule() {
                         </div>
                     </td>`;
                 } else {
-                    // Навіть якщо уроку немає, малюємо порожню клітинку (для 0-го уроку теж)
                     html += `<td class="${slotIdx === 0 ? 'slot-0' : ''}"></td>`;
                 }
             });
