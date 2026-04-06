@@ -364,15 +364,15 @@ function renderWorkload() {
 
     let html = `<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">`;
 
-    // Порядок як у вкладці "Вчителі"
+    // Використовуємо порядок з основного масиву вчителів
     state.teachers.forEach(teacher => {
         const currentWorkload = state.workload || [];
-        const teacherWorkload = currentWorkload.filter(w => w.teacherId === teacher.id);
+        const teacherWorkload = currentWorkload.filter(w => w.teacherId == teacher.id);
         
-        // Сортуємо предмети всередині картки (Клас -> Предмет)
+        // Сортуємо додані предмети всередині картки
         teacherWorkload.sort((a, b) => {
-            const classA = state.classes.find(c => c.id === a.classId)?.name || "";
-            const classB = state.classes.find(c => c.id === b.classId)?.name || "";
+            const classA = state.classes.find(c => c.id == a.classId)?.name || "";
+            const classB = state.classes.find(c => c.id == b.classId)?.name || "";
             const classComp = classA.localeCompare(classB, undefined, {numeric: true});
             return classComp !== 0 ? classComp : a.subject.localeCompare(b.subject);
         });
@@ -386,9 +386,9 @@ function renderWorkload() {
                     <span class="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-1 rounded-full">${totalHours}г</span>
                 </div>
                 
-                <div class="p-4 space-y-2 overflow-y-auto" style="max-height: 250px; min-height: 50px;">
-                    ${teacherWorkload.map(w => {
-                        const cls = state.classes.find(c => c.id === w.classId);
+                <div class="p-4 space-y-2 overflow-y-auto" style="max-height: 200px; min-height: 50px;">
+                    ${teacherWorkload.length > 0 ? teacherWorkload.map(w => {
+                        const cls = state.classes.find(c => c.id == w.classId);
                         return `
                             <div class="flex items-center justify-between p-2 bg-gray-50 rounded-lg border border-gray-100 text-sm">
                                 <div class="truncate">
@@ -397,22 +397,23 @@ function renderWorkload() {
                                 </div>
                                 <div class="flex items-center gap-2">
                                     <span class="font-bold">${w.hours}г</span>
-                                    <button onclick="deleteWorkload(${w.id})" class="text-gray-300 hover:text-red-500">×</button>
+                                    <button onclick="deleteWorkload('${w.id}')" class="text-gray-300 hover:text-red-500 text-xl line-height-1">&times;</button>
                                 </div>
                             </div>
                         `;
-                    }).join('')}
+                    }).join('') : '<p class="text-center text-gray-300 text-xs py-4">Навантаження не задано</p>'}
                 </div>
 
                 <div class="p-4 bg-gray-50 border-t border-gray-100 space-y-2">
                     <div class="grid grid-cols-2 gap-2">
-                        <select id="sel-cls-${teacher.id}" class="text-xs border rounded p-1">
+                        <select id="sel-cls-${teacher.id}" class="text-sm border rounded-lg p-2 bg-white outline-none focus:border-blue-500">
                             ${state.classes.map(c => `<option value="${c.id}">${c.name}</option>`).join('')}
                         </select>
-                        <input type="number" id="hrs-${teacher.id}" value="2" min="1" class="text-xs border rounded p-1" placeholder="Год.">
+                        <input type="number" id="hrs-${teacher.id}" value="2" min="1" class="text-sm border rounded-lg p-2 bg-white outline-none focus:border-blue-500">
                     </div>
-                    <input type="text" id="sub-${teacher.id}" class="w-full text-xs border rounded p-1" placeholder="Предмет (напр. Математика)">
-                    <button onclick="addWorkloadInline(${teacher.id})" class="w-full py-1.5 bg-blue-600 text-white text-xs font-bold rounded hover:bg-blue-700 transition">
+                    <input type="text" id="sub-${teacher.id}" class="w-full text-sm border rounded-lg p-2 bg-white outline-none focus:border-blue-500" placeholder="Назва предмета">
+                    
+                    <button onclick="addWorkloadInline('${teacher.id}')" class="w-full py-2.5 bg-blue-600 text-white text-sm font-bold rounded-lg hover:bg-blue-700 transition shadow-md shadow-blue-100">
                         Додати навантаження
                     </button>
                 </div>
@@ -426,25 +427,40 @@ function renderWorkload() {
 
 // Функція для обробки натискання кнопки в картці
 function addWorkloadInline(teacherId) {
-    const classId = parseInt(document.getElementById(`sel-cls-${teacherId}`).value);
-    const hours = parseInt(document.getElementById(`hrs-${teacherId}`).value);
-    const subject = document.getElementById(`sub-${teacherId}`).value.trim();
+    // Примусово робимо ID рядком для пошуку в DOM
+    const tIdStr = String(teacherId);
+    
+    const classSelect = document.getElementById(`sel-cls-${tIdStr}`);
+    const hourInput = document.getElementById(`hrs-${tIdStr}`);
+    const subjectInput = document.getElementById(`sub-${tIdStr}`);
 
-    if (!subject || !hours) {
-        alert("Заповніть предмет та години");
+    if (!classSelect || !hourInput || !subjectInput) {
+        console.error("Не вдалося знайти поля вводу для вчителя:", tIdStr);
+        return;
+    }
+
+    const classId = classSelect.value;
+    const hours = parseInt(hourInput.value);
+    const subject = subjectInput.value.trim();
+
+    if (!subject || isNaN(hours)) {
+        alert("Будь ласка, вкажіть назву предмета та кількість годин.");
         return;
     }
 
     const newItem = {
-        id: Date.now(),
-        teacherId,
-        classId,
-        subject,
-        hours
+        id: Date.now().toString(), // ID як рядок
+        teacherId: tIdStr,
+        classId: classId,
+        subject: subject,
+        hours: hours
     };
 
     if (!state.workload) state.workload = [];
     state.workload.push(newItem);
+    
+    // Очищуємо поле предмета після додавання
+    subjectInput.value = "";
     
     renderAll();
     save();
