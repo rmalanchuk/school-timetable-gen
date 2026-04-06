@@ -605,6 +605,13 @@ function updateManualLesson(teacherId, day, slot, element) {
     }
 }
 
+Щоб виправити зсув і звільнити 0-й рядок, ми змінимо логіку пошуку уроку всередині renderSchedule.
+
+Ми скажемо програмі: «Якщо ти малюєш 1-й рядок, шукай у базі урок №0. Якщо малюєш 2-й — шукай №1». Таким чином, 0-й рядок завжди залишатиметься порожнім для твого ручного введення.
+
+Ось повністю виправлена функція:
+
+JavaScript
 function renderSchedule() {
     const container = document.getElementById('schedule-output');
     if (!container) return;
@@ -633,7 +640,7 @@ function renderSchedule() {
             <tbody>`;
 
     daysNames.forEach((dayName, dayIdx) => {
-        // Ми завжди малюємо 9 рядків: від 0 до 8
+        // Залишаємо 9 рядків (0-8)
         for (let slotIdx = 0; slotIdx <= 8; slotIdx++) {
             const isFirstSlot = slotIdx === 0;
             html += `<tr class="${slotIdx === 8 ? 'border-b-2 border-b-slate-300' : 'border-b border-gray-100'} hover:bg-blue-50/30">`;
@@ -642,11 +649,21 @@ function renderSchedule() {
                 html += `<td rowspan="9" class="bg-slate-50 border-r text-center font-bold text-slate-500 uppercase [writing-mode:vertical-lr] rotate-180">${dayName}</td>`;
             }
 
-            // Номер уроку: 0 виділяємо, інші — сірі
             html += `<td class="text-center border-r p-2 ${slotIdx === 0 ? 'text-orange-600 font-bold bg-orange-50/50' : 'text-gray-400'}">${slotIdx}</td>`;
 
             state.teachers.forEach(teacher => {
-                const lesson = state.schedule.find(s => s.day === dayIdx && s.slot === slotIdx && s.teacherId == teacher.id);
+                // --- ОСНОВНА ЗМІНА ТУТ ---
+                let lesson;
+                if (slotIdx === 0) {
+                    // Для 0-го рядка шукаємо ТІЛЬКИ ті уроки, які ми ВЖЕ вписали туди вручну
+                    lesson = state.schedule.find(s => s.day === dayIdx && s.slot === 0 && s.teacherId == teacher.id);
+                } else {
+                    // Для всіх інших (1-8) шукаємо згенеровані уроки, сунувши індекс назад на 1
+                    // Тобто в рядку №1 відобразиться урок, який у базі має slot: 0
+                    lesson = state.schedule.find(s => s.day === dayIdx && s.slot === (slotIdx - 1) && s.teacherId == teacher.id);
+                }
+                // -------------------------
+
                 const cls = lesson ? state.classes.find(c => c.id == lesson.classId) : null;
 
                 html += `
