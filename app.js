@@ -241,7 +241,7 @@ function generateSchedule() {
     state.schedule = [];
     let items = (state.workload || []).map(item => ({ ...item }));
     
-    // Сортуємо: Важкі предмети ставимо першими
+    // Сортуємо: Важкі предмети першими
     items.sort((a, b) => getPriority(a.subject) - getPriority(b.subject));
 
     items.forEach(item => {
@@ -253,51 +253,45 @@ function generateSchedule() {
             let minScore = Infinity;
 
             for (let d = 0; d < 5; d++) {
-                // ЖОРСТКЕ ОБМЕЖЕННЯ: Автоматика працює ТІЛЬКИ з 1 по 7 уроки
+                // Тільки 1-7 уроки. 8-й ігноруємо повністю.
                 for (let s = 1; s <= 7; s++) { 
                     const teacher = state.teachers.find(t => String(t.id) === String(item.teacherId));
                     
-                    // 1. Перевірка зайнятості
+                    // 1. Перевірка зайнятості (вчитель або клас)
                     const isOccupied = state.schedule.some(x => 
                         x.day === d && x.slot === s && 
                         (String(x.classId) === String(item.classId) || String(x.teacherId) === String(item.teacherId))
                     );
                     if (isOccupied) continue;
 
-                    // 2. Ліміт на день (макс 2 однакових)
+                    // 2. Ліміт на день (не більше 2-х однакових)
                     const dailyCount = state.schedule.filter(x => 
                         x.day === d && String(x.classId) === String(item.classId) && 
                         x.subject.toLowerCase().trim() === subNameLower
                     ).length;
                     if (dailyCount >= 2) continue;
 
-                    // 3. Перевірка "червоної зони" вчителя (ЖОРСТКА ЗАБОРОНА)
-                    // Якщо вчитель помітив цей слот як "Зайнятий", автоматика сюди НЕ ПХНЕ
-                    if (teacher?.availability?.[d]?.[s] === false) continue;
+                    // 3. ЖОРСТКА ПЕРЕВІРКА ДОСТУПНОСТІ (з урахуванням індексу s-1)
+                    if (teacher?.availability?.[d]?.[s - 1] === false) continue;
 
-                    // --- РОЗРАХУНОК SCORE ---
-                    let score = Math.pow(s, 3); // Пріоритет верхнім урокам
+                    // --- SCORE ---
+                    let score = Math.pow(s, 3); // Пріоритет першим урокам
 
-                    // Штраф за спарені уроки (Алгебра + Алгебра підряд - НІ)
+                    // Штраф за спарені уроки (Алгебра + Алгебра підряд)
                     if (s > 1) {
                         const prevLesson = state.schedule.find(x => 
                             x.day === d && x.slot === s - 1 && String(x.classId) === String(item.classId)
                         );
                         if (prevLesson && prevLesson.subject.toLowerCase().trim() === subNameLower) {
-                            score += 10000;
+                            score += 15000; // Величезний штраф, щоб рознести уроки
                         }
                     }
 
-                    // Штраф за легкі/середні на 1-му уроці
+                    // Штрафи за "вікна" та ранні уроки для легких предметів
                     if (priority === 3 && s === 1) score += 5000;
-                    if (priority === 2 && s === 1) score += 1500;
-
-                    // Штраф за "вікна" (уроки мають бути купою зверху)
                     if (s > 1) {
-                        const hasLessonAbove = state.schedule.some(x => 
-                            x.day === d && x.slot === s - 1 && String(x.classId) === String(item.classId)
-                        );
-                        if (!hasLessonAbove) score += 4000; 
+                        const hasAbove = state.schedule.some(x => x.day === d && x.slot === s-1 && String(x.classId) === String(item.classId));
+                        if (!hasAbove) score += 4000;
                     }
 
                     score += Math.random() * 5;
@@ -319,7 +313,7 @@ function generateSchedule() {
                     slot: bestSlot.s
                 });
             } else {
-                console.warn(`Не вдалося знайти вільний слот для: ${item.subject} (${item.classId})`);
+                console.error("КРИТИЧНО: Немає місця для", item.subject, "клас", item.classId);
             }
         }
     });
@@ -522,41 +516,6 @@ function renderWorkloadItems(teacher) {
             </div>
         `;
     }).join('');
-}
-
-function addWorkload(teacherId) {
-    const classSelect = document.getElementById(`sel-cls-${teacherId}`);
-    const subjectInput = document.getElementById(`inp-sub-${teacherId}`);
-    const hoursInput = document.getElementById(`inp-hrs-${teacherId}`);
-
-    const classId = classSelect.value;
-    const subject = subjectInput.value.trim();
-    const hours = parseInt(hoursInput.value);
-
-    if (!subject || isNaN(hours) || hours <= 0) {
-        alert("Введіть назву предмета та кількість годин");
-        return;
-    }
-
-    const teacher = state.teachers.find(t => t.id === teacherId);
-    
-    // Гарантуємо, що workload — це масив
-    if (!Array.isArray(teacher.workload)) {
-        teacher.workload = [];
-    }
-
-    teacher.workload.push({ 
-        classId: classId, 
-        subject: subject, 
-        hours: hours 
-    });
-    
-    // Очищуємо інпути після додавання
-    subjectInput.value = '';
-    hoursInput.value = '';
-
-    save();
-    renderWorkload();
 }
 
 function deleteWorkload(id) {
