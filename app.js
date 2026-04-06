@@ -574,18 +574,28 @@ function renderSchedule() {
         return;
     }
 
+    // Функція для форматування: "Маланчук Роман Степанович" -> "МАЛАНЧУК Р. С."
+    const formatNameForTable = (fullName) => {
+        if (!fullName) return "";
+        const parts = fullName.trim().split(/\s+/);
+        if (parts.length === 1) return parts[0].toUpperCase();
+        const surname = parts[0].toUpperCase();
+        const initials = parts.slice(1).map(p => p[0].toUpperCase() + ".").join(" ");
+        return `${surname} ${initials}`;
+    };
+
     const daysNames = ["Понеділок", "Вівторок", "Середа", "Четвер", "П'ятниця"];
     
     let html = `
         <div class="overflow-x-auto bg-white rounded-xl shadow-md border border-gray-200">
             <table class="w-full border-collapse min-w-[800px] table-fixed">
                 <thead>
-                    <tr class="bg-slate-100 text-slate-700 text-xs uppercase">
+                    <tr class="bg-slate-100 text-slate-700 text-[10px] uppercase tracking-wider">
                         <th class="w-12 border-b border-r p-2">День</th>
                         <th class="w-10 border-b border-r p-2">№</th>
                         ${state.teachers.map(t => `
                             <th class="border-b border-r p-2 text-center truncate" title="${t.name}">
-                                ${t.name.split(' ')[0]}
+                                ${formatNameForTable(t.name)}
                             </th>
                         `).join('')}
                     </tr>
@@ -598,7 +608,6 @@ function renderSchedule() {
             const isFirstSlot = slotIdx === 0;
             html += `<tr class="${slotIdx === 7 ? 'border-b-2 border-b-slate-300' : 'border-b border-gray-100'} hover:bg-blue-50/30 transition">`;
 
-            // 1. Колонка дня (з rowspan)
             if (isFirstSlot) {
                 html += `
                     <td rowspan="8" class="bg-slate-50 border-r border-gray-200 text-center font-bold text-slate-500 text-[10px] uppercase tracking-widest [writing-mode:vertical-lr] rotate-180">
@@ -606,16 +615,13 @@ function renderSchedule() {
                     </td>`;
             }
 
-            // 2. Номер уроку
             html += `<td class="text-center text-gray-400 font-medium text-xs border-r border-gray-100 p-2">${slotIdx + 1}</td>`;
 
-            // 3. Уроки вчителів
             state.teachers.forEach(teacher => {
                 const lesson = state.schedule.find(s => s.day === dayIdx && s.slot === slotIdx && s.teacherId == teacher.id);
                 
                 if (lesson) {
                     const cls = state.classes.find(c => c.id == lesson.classId);
-                    // Використовуємо твою логіку малих літер для предмета
                     const rawCode = typeof getSubjectCode === 'function' ? getSubjectCode(lesson.subject) : lesson.subject;
                     const code = rawCode.toLowerCase();
 
