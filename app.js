@@ -371,19 +371,21 @@ function renderWorkload() {
     let html = `<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">`;
 
     sortedTeachers.forEach(teacher => {
-        const teacherWorkload = state.workload.filter(w => w.teacherId === teacher.id);
+        // Додаємо перевірку: якщо state.workload не існує, використовуємо пустий масив []
+        const currentWorkload = state.workload || []; 
+        const teacherWorkload = currentWorkload.filter(w => w && w.teacherId === teacher.id);
         
         // Сортування: спочатку за номером класу, потім за назвою предмета
         teacherWorkload.sort((a, b) => {
-            const classA = state.classes.find(c => c.id === a.classId)?.name || "";
-            const classB = state.classes.find(c => c.id === b.classId)?.name || "";
+            const classA = (state.classes.find(c => c.id === a.classId)?.name || "").toString();
+            const classB = (state.classes.find(c => c.id === b.classId)?.name || "").toString();
             
-            // Порівняння класів (напр. "7-А" vs "10-Б")
+            // Числове сортування класів
             const classComparison = classA.localeCompare(classB, undefined, {numeric: true});
             if (classComparison !== 0) return classComparison;
             
-            // Якщо класи однакові, сортуємо за предметом
-            return a.subject.localeCompare(b.subject);
+            // Сортування за назвою предмета
+            return (a.subject || "").localeCompare(b.subject || "");
         });
 
         const totalHours = teacherWorkload.reduce((sum, w) => sum + w.hours, 0);
