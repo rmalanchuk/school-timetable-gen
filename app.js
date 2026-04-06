@@ -650,19 +650,24 @@ function printSchedule() {
             <style>
                 @page { size: A4 portrait; margin: 5mm; }
                 body { font-family: 'Segoe UI', Arial, sans-serif; margin: 0; padding: 0; }
-                table { width: 100%; border-collapse: collapse; table-layout: fixed; border: 1.2pt solid #000; }
-                th, td { border: 1pt solid #000; text-align: center; padding: 0; box-sizing: border-box; height: 20px; vertical-align: middle; }
+                table { width: 100%; border-collapse: collapse; table-layout: fixed; border: 1.5pt solid #000; }
+                th, td { border: 0.5pt solid #000; text-align: center; padding: 0; box-sizing: border-box; height: 20px; vertical-align: middle; }
+                
+                /* Шапка таблиці з жирним низом */
+                thead tr th { border-bottom: 2.5pt solid #000 !important; }
+                
                 .corner-cell { font-size: 7px !important; font-weight: bold; width: 18px; }
                 .col-num { width: 16px; font-size: 8px !important; color: #333; }
                 .day-cell { font-weight: bold; writing-mode: vertical-lr; transform: rotate(180deg); font-size: 9px; width: 18px; background-color: #f1f5f9 !important; }
                 th.teacher-name { height: 110px; writing-mode: vertical-lr; transform: rotate(180deg); white-space: nowrap; font-size: 10px; font-weight: bold; text-align: left; padding: 5px 2px; background-color: #f8fafc !important; }
+                
                 .lesson-box { display: block; width: 100%; line-height: 1; }
                 .class-name { font-size: 9px !important; font-weight: 800; display: block; margin-top: 1px; }
                 .sub-code { font-size: 6.5px !important; font-weight: 400; text-transform: lowercase; display: block; margin-bottom: 1px; }
                 .slot-0 { background-color: #fffaf0 !important; }
                 
-                /* Жирна лінія між днями */
-                .day-boundary td, .day-boundary th { 
+                /* Клас для жирної лінії МІЖ днями */
+                .day-boundary td { 
                     border-top: 2.5pt solid #000 !important; 
                 }
             </style>
@@ -685,9 +690,10 @@ function printSchedule() {
         const totalRowsForDay = 9 - startSlot;
 
         for (let slotIdx = startSlot; slotIdx <= 8; slotIdx++) {
-            // Визначаємо, чи це початок дня (крім самого першого дня таблиці), щоб дати жирну лінію
-            const isNewDay = (slotIdx === startSlot && dayIdx > 0);
-            const rowClass = isNewDay ? 'class="day-boundary"' : '';
+            // Лінія day-boundary додається ТІЛЬКИ між днями (Вівторок, Середа і т.д.)
+            // Для Понеділка лінію дасть 'thead'
+            const isBoundary = (slotIdx === startSlot && dayIdx > 0);
+            const rowClass = isBoundary ? 'class="day-boundary"' : '';
 
             html += `<tr ${rowClass}>`;
             
