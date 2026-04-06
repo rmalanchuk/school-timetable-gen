@@ -632,7 +632,6 @@ function printSchedule() {
     const daysNames = ["ПОНЕДІЛОК", "ВІВТОРОК", "СЕРЕДА", "ЧЕТВЕР", "П'ЯТНИЦЯ"];
     const dateStr = new Date().toLocaleDateString('uk-UA');
 
-    // Функція для перетворення "Прізвище Ім'я По батькові" в "Прізвище І. П."
     const formatName = (fullName) => {
         if (!fullName) return "";
         const parts = fullName.trim().split(/\s+/);
@@ -647,44 +646,31 @@ function printSchedule() {
         <head>
             <title>Друк розкладу</title>
             <style>
-                @page {
-                    size: A4 portrait;
-                    margin: 5mm;
-                }
+                @page { size: A4 portrait; margin: 5mm; }
                 body { 
-                    font-family: Arial, sans-serif; 
-                    margin: 0; 
-                    padding: 0; 
+                    font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; 
+                    margin: 0; padding: 0; 
                     -webkit-print-color-adjust: exact; 
                 }
-                h2 { 
-                    text-align: center; 
-                    font-size: 11px; 
-                    margin: 2mm 0; 
-                }
-                table { 
-                    width: 100%; 
-                    border-collapse: collapse; 
-                    table-layout: fixed; 
-                }
+                h2 { text-align: center; font-size: 11px; margin: 2mm 0; color: #334155; }
+                table { width: 100%; border-collapse: collapse; table-layout: fixed; }
                 th, td { 
-                    border: 0.5pt solid black; 
+                    border: 0.5pt solid #000; 
                     text-align: center; 
-                    font-size: 8px; 
                     line-height: 1.1;
                     height: 16px;
-                    padding: 1px 0;
+                    padding: 0;
                 }
                 th.teacher-name {
-                    height: 90px; /* Трохи збільшив для ініціалів */
+                    height: 95px;
                     writing-mode: vertical-lr;
                     transform: rotate(180deg);
                     white-space: nowrap;
                     font-size: 9px;
-                    font-weight: bold;
+                    font-weight: 600;
                     padding: 4px 2px;
-                    background-color: #f0f0f0;
-                    text-align: left; /* Після повороту це буде "низ" заголовка */
+                    background-color: #f8fafc;
+                    text-align: left;
                 }
                 .day-cell { 
                     font-weight: bold; 
@@ -692,24 +678,28 @@ function printSchedule() {
                     transform: rotate(180deg); 
                     width: 15px; 
                     font-size: 8px;
-                    background: #f9f9f9;
+                    background: #f1f5f9;
+                    text-transform: uppercase;
                 }
-                .slot-num { 
-                    width: 15px; 
-                    font-size: 7px;
+                .slot-num { width: 15px; font-size: 7px; color: #64748b; }
+                
+                /* Стилізація коду предмета */
+                .lesson-box { font-size: 9px; font-weight: 700; }
+                .sub-code { 
+                    font-size: 8px; 
+                    font-weight: 400; 
+                    text-transform: lowercase; /* Малі букви */
+                    color: #1e293b;
                 }
-                strong { display: block; font-weight: bold; }
             </style>
         </head>
         <body>
-            <h2>ЗВЕДЕНИЙ РОЗКЛАД (${dateStr})</h2>
+            <h2>ЗВЕДЕНИЙ РОЗКЛАД (СТАНОМ НА ${dateStr})</h2>
             <table>
                 <thead>
                     <tr>
-                        <th colspan="2" style="width: 30px; height: 90px;">ДН/№</th>
-                        ${state.teachers.map(t => `
-                            <th class="teacher-name">${formatName(t.name)}</th>
-                        `).join('')}
+                        <th colspan="2" style="width: 30px; height: 95px;">ДН/№</th>
+                        ${state.teachers.map(t => `<th class="teacher-name">${formatName(t.name)}</th>`).join('')}
                     </tr>
                 </thead>
                 <tbody>
@@ -718,17 +708,21 @@ function printSchedule() {
     daysNames.forEach((dayName, dayIdx) => {
         for (let slotIdx = 0; slotIdx < 8; slotIdx++) {
             html += `<tr>`;
-            if (slotIdx === 0) {
-                html += `<td rowspan="8" class="day-cell">${dayName}</td>`;
-            }
+            if (slotIdx === 0) html += `<td rowspan="8" class="day-cell">${dayName}</td>`;
             html += `<td class="slot-num">${slotIdx + 1}</td>`;
 
             state.teachers.forEach(teacher => {
                 const lesson = state.schedule.find(s => s.day === dayIdx && s.slot === slotIdx && s.teacherId == teacher.id);
                 if (lesson) {
-                    const cls = state.classes.find(c => c.id == lesson.classId)?.name || '';
+                    const clsName = state.classes.find(c => c.id == lesson.classId)?.name || '';
                     const code = typeof getSubjectCode === 'function' ? getSubjectCode(lesson.subject) : lesson.subject;
-                    html += `<td><strong>${cls}${code}</strong></td>`;
+                    
+                    // Виділяємо номер класу жирним, а предмет — малими буквами
+                    html += `<td>
+                        <div class="lesson-box">
+                            ${clsName}<span class="sub-code">${code}</span>
+                        </div>
+                    </td>`;
                 } else {
                     html += `<td></td>`;
                 }
