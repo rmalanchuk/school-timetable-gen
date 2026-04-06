@@ -605,13 +605,6 @@ function updateManualLesson(teacherId, day, slot, element) {
     }
 }
 
-Щоб виправити зсув і звільнити 0-й рядок, ми змінимо логіку пошуку уроку всередині renderSchedule.
-
-Ми скажемо програмі: «Якщо ти малюєш 1-й рядок, шукай у базі урок №0. Якщо малюєш 2-й — шукай №1». Таким чином, 0-й рядок завжди залишатиметься порожнім для твого ручного введення.
-
-Ось повністю виправлена функція:
-
-JavaScript
 function renderSchedule() {
     const container = document.getElementById('schedule-output');
     if (!container) return;
