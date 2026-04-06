@@ -680,7 +680,7 @@ function printSchedule() {
                     -webkit-print-color-adjust: exact; 
                     print-color-adjust: exact;
                 }
-                h2 { text-align: center; font-size: 11px; margin: 2mm 0; text-transform: uppercase; }
+                h2 { text-align: center; font-size: 10px; margin: 2mm 0; text-transform: uppercase; }
                 
                 table { 
                     width: 100%; 
@@ -692,55 +692,64 @@ function printSchedule() {
                 th, td { 
                     border: 1px solid #000; 
                     text-align: center; 
-                    height: 16px; 
+                    height: 14px; /* Ще трохи зменшив висоту рядка */
                     padding: 0; 
                     box-sizing: border-box;
                 }
                 
-                /* Кутова клітинка ДН/№ */
+                /* Кутова клітинка ДН/№ — тепер максимально компактна */
                 .corner-cell { 
-                    font-size: 7px; /* Зменшено, щоб не вилазило */
+                    font-size: 5.5px !important; 
                     font-weight: bold;
                     line-height: 1;
                     width: 18px;
                 }
             
-                .col-num { width: 22px; font-size: 8px; font-weight: bold; }
+                /* Номери уроків (1, 2, 3...) */
+                .col-num { 
+                    width: 20px; 
+                    font-size: 6.5px !important; 
+                    font-weight: bold; 
+                    color: #000;
+                }
             
                 th.teacher-name {
-                    height: 115px; /* Трохи збільшено висоту для довгих Прізвищ */
+                    height: 110px;
                     writing-mode: vertical-lr;
                     transform: rotate(180deg);
                     white-space: nowrap;
-                    font-size: 8.5px; /* Трохи зменшено для ініціалів */
+                    font-size: 8px; /* Компактні імена вчителів */
                     font-weight: bold;
                     background-color: #f8fafc !important;
                     text-align: left;
-                    padding: 6px 2px; /* Збільшено відступ знизу (який зверху через поворот) */
+                    padding: 4px 2px;
                 }
             
                 .day-cell { 
                     font-weight: bold; 
                     writing-mode: vertical-lr; 
                     transform: rotate(180deg); 
-                    font-size: 8px;
+                    font-size: 7px;
                     background-color: #f1f5f9 !important;
                     width: 18px;
                 }
             
+                /* Стиль для уроку: 9 клас великий, предмет малий під ним */
                 .lesson-box { 
-                    font-size: 8.5px; 
-                    font-weight: 700; 
-                    line-height: 1.1; 
-                    width: 100%;
-                    display: block;
+                    font-size: 8px !important; /* Розмір цифри класу */
+                    font-weight: 800; 
+                    line-height: 0.9; 
+                    display: flex;
+                    flex-direction: column;
+                    align-items: center;
+                    justify-content: center;
                 }
             
                 .sub-code { 
-                    font-size: 7px; 
+                    font-size: 5.5px !important; /* Дуже малі літери предмета */
                     font-weight: 400; 
                     text-transform: lowercase; 
-                    display: block; /* Перенос на новий рядок для економії ширини */
+                    margin-top: 1px;
                 }
             </style>
         </head>
