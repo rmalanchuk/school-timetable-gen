@@ -238,17 +238,14 @@ function toggleAvailability(dayIndex, lessonIndex) {
 // --- ГЕНЕРАТОР РОЗКЛАДУ ---
 
 function generateSchedule() {
-    // 1. Очистка попереднього розкладу
     state.schedule = [];
-    
-    // 2. Підготовка та перемішування даних навантаження
     let items = (state.workload || []).map(item => ({ ...item }));
+    
+    // Перемішуємо предмети, щоб щоразу був трохи інший результат
     items = items.sort(() => Math.random() - 0.5);
 
-    // 3. Основний алгоритм генерації
     items.forEach(item => {
         const subNameLower = item.subject.toLowerCase().trim();
-        
         let priority = 2; 
         for (let key in subjectPriorities) {
             if (subNameLower.includes(key)) {
@@ -259,46 +256,51 @@ function generateSchedule() {
 
         for (let h = 0; h < item.hours; h++) {
             let placed = false;
-            const randomDays = [0, 1, 2, 3, 4].sort(() => Math.random() - 0.5);
-            
-            for (let d of randomDays) {
-                if (placed) break;
-                
-                // ЗМІНА ТУТ: Починаємо з 1, щоб автоматика не чіпала 0-й урок
-                for (let s = 1; s <= 8; s++) { 
+            // Створюємо список можливих слотів (День, Слот)
+            let candidates = [];
+
+            for (let d = 0; d < 5; d++) {
+                // Починаємо з 1 (0-й тільки для ручних правок)
+                for (let s = 1; s <= 8; s++) {
                     const teacher = state.teachers.find(t => t.id == item.teacherId);
                     
-                    if (priority === 1 && s > 3 && Math.random() > 0.3) continue;
-                    if (priority === 3 && s < 3 && Math.random() > 0.3) continue;
+                    // СУВОРА ПЕРЕВІРКА ДОСТУПНОСТІ (Червоні клітинки у вчителя)
                     if (teacher?.availability?.[d]?.[s] === false) continue;
-                    if (state.schedule.some(x => x.day === d && x.slot === s && x.classId == item.classId)) continue;
-                    if (state.schedule.some(x => x.day === d && x.slot === s && x.teacherId == item.teacherId)) continue;
                     
-                    const sameToday = state.schedule.some(x => x.day === d && x.classId == item.classId && x.subject.toLowerCase().trim() === subNameLower);
-                    if (sameToday && item.hours <= 5) continue;
-                    
-                    const maths = ['алгебр', 'геометр', 'матем'];
-                    const isCurrentMath = maths.some(m => subNameLower.includes(m));
-                    if (isCurrentMath) {
-                        const hasOtherMathToday = state.schedule.some(x => {
-                            const otherSub = x.subject.toLowerCase().trim();
-                            const isOtherMath = maths.some(m => otherSub.includes(m));
-                            return x.day === d && x.classId == item.classId && isOtherMath && otherSub !== subNameLower;
-                        });
-                        if (hasOtherMathToday && item.hours <= 5) continue;
-                    }
+                    // Перевірка зайнятості класу і вчителя в цей час
+                    if (state.schedule.some(x => x.day === d && x.slot === s && (x.classId == item.classId || x.teacherId == item.teacherId))) continue;
 
-                    state.schedule.push({
-                        id: Date.now() + Math.random(),
-                        teacherId: item.teacherId, // важливо зберігати як є
-                        classId: item.classId,
-                        subject: item.subject,
-                        day: d,
-                        slot: s
-                    });
-                    placed = true;
-                    break;
+                    // Баланс: не більше двох однакових предметів на день
+                    const countToday = state.schedule.filter(x => x.day === d && x.classId == item.classId && x.subject.toLowerCase().trim() === subNameLower).length;
+                    if (countToday >= 2) continue;
+
+                    // Якщо пройшли базові перевірки — додаємо в кандидати
+                    // Розраховуємо "вартість" слота: чим раніше, тим дешевше
+                    let score = s; // 1 урок = 1 бал, 8 урок = 8 балів
+                    
+                    // Додаткові штрафи/бонуси за пріоритет
+                    if (priority === 1 && s > 4) score += 10; // Складні предмети дуже не хочуть бути після 4 уроку
+                    if (priority === 3 && s < 3) score += 5;  // Легкі предмети не дуже хочуть бути першими
+
+                    candidates.push({ d, s, score });
                 }
+            }
+
+            // Сортуємо кандидатів за "вартістю" (від найлегших до найважчих)
+            // Додаємо трохи рандому (Math.random() * 2), щоб розклад не був ідентичним завжди
+            candidates.sort((a, b) => (a.score + Math.random() * 2) - (b.score + Math.random() * 2));
+
+            if (candidates.length > 0) {
+                const best = candidates[0];
+                state.schedule.push({
+                    id: Date.now() + Math.random(),
+                    teacherId: item.teacherId,
+                    classId: item.classId,
+                    subject: item.subject,
+                    day: best.d,
+                    slot: best.s
+                });
+                placed = true;
             }
         }
     });
