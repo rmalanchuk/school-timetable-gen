@@ -650,60 +650,24 @@ function printSchedule() {
             <style>
                 @page { size: A4 portrait; margin: 5mm; }
                 body { font-family: 'Segoe UI', Arial, sans-serif; margin: 0; padding: 0; }
+                table { width: 100%; border-collapse: collapse; table-layout: fixed; border: 1.5pt solid #000; }
+                th, td { border: 0.5pt solid #000; text-align: center; padding: 0; box-sizing: border-box; height: 20px; vertical-align: middle; }
                 
-                table { 
-                    width: 100%; 
-                    border-collapse: collapse; 
-                    table-layout: fixed; 
-                    border: 2.5pt solid #000; /* Жирна зовнішня рамка */
-                }
-                
-                th, td { 
-                    border: 0.5pt solid #000; 
-                    text-align: center; 
-                    padding: 0; 
-                    box-sizing: border-box; 
-                    height: 20px; 
-                    vertical-align: middle; 
-                }
-
-                /* ЖИРНА ЛІНІЯ ПІД ХЕДЕРОМ */
+                /* Жирна лінія під іменами вчителів */
                 thead th { border-bottom: 2.5pt solid #000 !important; }
-
-                /* КЛАС ДЛЯ ЖИРНОЇ ЛІНІЇ МІЖ ДНЯМИ */
-                .day-boundary td { border-top: 2.5pt solid #000 !important; }
+                
+                /* Клас для жирної лінії В КІНЦІ дня */
+                .day-end-row td { border-bottom: 2.5pt solid #000 !important; }
 
                 .corner-cell { font-size: 7px !important; font-weight: bold; width: 18px; }
                 .col-num { width: 16px; font-size: 8px !important; color: #333; }
+                .day-cell { font-weight: bold; writing-mode: vertical-lr; transform: rotate(180deg); font-size: 9px; width: 18px; background-color: #f1f5f9 !important; }
+                th.teacher-name { height: 110px; writing-mode: vertical-lr; transform: rotate(180deg); white-space: nowrap; font-size: 10px; font-weight: bold; text-align: left; padding: 5px 2px; background-color: #f8fafc !important; }
                 
-                .day-cell { 
-                    font-weight: bold; 
-                    writing-mode: vertical-lr; 
-                    transform: rotate(180deg); 
-                    font-size: 9px; 
-                    width: 18px; 
-                    background-color: #f1f5f9 !important; 
-                }
-                
-                /* Ховаємо текст дня у повторюваних рядках, щоб виглядало як об'єднане */
-                .day-cell.hidden-text { color: transparent; border-top: none !important; }
-
-                th.teacher-name { 
-                    height: 110px; 
-                    writing-mode: vertical-lr; 
-                    transform: rotate(180deg); 
-                    white-space: nowrap; 
-                    font-size: 10px; 
-                    font-weight: bold; 
-                    text-align: left; 
-                    padding: 5px 2px; 
-                    background-color: #f8fafc !important; 
-                }
-                
-                .slot-0 { background-color: #fffaf0 !important; }
                 .lesson-box { display: block; width: 100%; line-height: 1; }
                 .class-name { font-size: 9px !important; font-weight: 800; display: block; margin-top: 1px; }
                 .sub-code { font-size: 6.5px !important; font-weight: 400; text-transform: lowercase; display: block; margin-bottom: 1px; }
+                .slot-0 { background-color: #fffaf0 !important; }
             </style>
         </head>
         <body>
@@ -721,37 +685,37 @@ function printSchedule() {
     daysNames.forEach((dayName, dayIdx) => {
         const dayHasZeroSlot = state.schedule.some(s => s.day === dayIdx && s.slot === 0);
         const startSlot = dayHasZeroSlot ? 0 : 1;
+        const totalRowsForDay = 9 - startSlot;
 
         for (let slotIdx = startSlot; slotIdx <= 8; slotIdx++) {
-            const isFirstRowOfDay = (slotIdx === startSlot);
-            const needsSeparator = (isFirstRowOfDay && dayIdx > 0);
-            
-            // Застосовуємо жирну лінію до ВСЬОГО рядка
-            const rowAttr = needsSeparator ? 'class="day-boundary"' : '';
+            // Малюємо жирну лінію ЗНИЗУ останнього уроку кожного дня (крім п'ятниці, там межа таблиці)
+            const isLastRowOfDay = (slotIdx === 8);
+            const needsSeparator = (isLastRowOfDay && dayIdx < 4);
+            const rowClass = needsSeparator ? 'class="day-end-row"' : '';
 
-            html += `<tr ${rowAttr}>`;
+            html += `<tr ${rowClass}>`;
             
-            // Замість rowspan малюємо окрему клітинку в кожному рядку
-            // Але текст показуємо тільки в першому рядку дня
-            html += `<td class="day-cell ${!isFirstRowOfDay ? 'hidden-text' : ''}">${dayName}</td>`;
+            if (slotIdx === startSlot) {
+                html += `<td rowspan="${totalRowsForDay}" class="day-cell">${dayName}</td>`;
+            }
             
             html += `<td class="col-num ${slotIdx === 0 ? 'slot-0' : ''}">${slotIdx}</td>`;
 
             state.teachers.forEach(teacher => {
                 const lesson = state.schedule.find(s => s.day === dayIdx && s.slot === slotIdx && s.teacherId == teacher.id);
-                const slotClass = slotIdx === 0 ? 'slot-0' : '';
+                const slot0Class = slotIdx === 0 ? 'slot-0' : '';
                 
                 if (lesson) {
                     const clsName = state.classes.find(c => c.id == lesson.classId)?.name || '';
                     const rawCode = typeof getSubjectCode === 'function' ? getSubjectCode(lesson.subject) : lesson.subject;
-                    html += `<td class="${slotClass}">
+                    html += `<td class="${slot0Class}">
                         <div class="lesson-box">
                             <span class="class-name">${clsName}</span>
                             <span class="sub-code">${rawCode}</span>
                         </div>
                     </td>`;
                 } else {
-                    html += `<td class="${slotClass}"></td>`;
+                    html += `<td class="${slot0Class}"></td>`;
                 }
             });
             html += `</tr>`;
