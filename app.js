@@ -580,6 +580,16 @@ function printSchedule() {
     const daysNames = ["ПОНЕДІЛОК", "ВІВТОРОК", "СЕРЕДА", "ЧЕТВЕР", "П'ЯТНИЦЯ"];
     const dateStr = new Date().toLocaleDateString('uk-UA');
 
+    // Функція для перетворення "Прізвище Ім'я По батькові" в "Прізвище І. П."
+    const formatName = (fullName) => {
+        if (!fullName) return "";
+        const parts = fullName.trim().split(/\s+/);
+        if (parts.length === 1) return parts[0];
+        const surname = parts[0];
+        const initials = parts.slice(1).map(p => p[0].toUpperCase() + ".").join(" ");
+        return `${surname} ${initials}`;
+    };
+
     let html = `
         <html>
         <head>
@@ -609,19 +619,20 @@ function printSchedule() {
                     border: 0.5pt solid black; 
                     text-align: center; 
                     font-size: 8px; 
-                    line-height: 1;
+                    line-height: 1.1;
                     height: 16px;
                     padding: 1px 0;
                 }
-                /* Вертикальні заголовки для вчителів */
                 th.teacher-name {
-                    height: 80px; /* Висота для вертикального тексту */
+                    height: 90px; /* Трохи збільшив для ініціалів */
                     writing-mode: vertical-lr;
                     transform: rotate(180deg);
                     white-space: nowrap;
-                    font-size: 8px;
-                    padding: 2px;
+                    font-size: 9px;
+                    font-weight: bold;
+                    padding: 4px 2px;
                     background-color: #f0f0f0;
+                    text-align: left; /* Після повороту це буде "низ" заголовка */
                 }
                 .day-cell { 
                     font-weight: bold; 
@@ -643,9 +654,9 @@ function printSchedule() {
             <table>
                 <thead>
                     <tr>
-                        <th colspan="2" style="width: 30px; height: 80px;">ДН/№</th>
+                        <th colspan="2" style="width: 30px; height: 90px;">ДН/№</th>
                         ${state.teachers.map(t => `
-                            <th class="teacher-name">${t.name}</th>
+                            <th class="teacher-name">${formatName(t.name)}</th>
                         `).join('')}
                     </tr>
                 </thead>
