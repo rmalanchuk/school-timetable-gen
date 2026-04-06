@@ -238,10 +238,13 @@ function toggleAvailability(dayIndex, lessonIndex) {
 // --- ГЕНЕРАТОР РОЗКЛАДУ ---
 
 function generateSchedule() {
+    // 1. Очищення розкладу перед новим циклом
     state.schedule = [];
+    
+    // 2. Підготовка даних (копіюємо, щоб не мутувати оригінал)
     let items = (state.workload || []).map(item => ({ ...item }));
-
-    // Сортуємо: важкі предмети спочатку
+    
+    // Сортуємо предмети за пріоритетом (важкі першими), щоб вони зайняли кращі слоти
     items.sort((a, b) => getPriority(a.subject) - getPriority(b.subject));
 
     items.forEach(item => {
@@ -249,52 +252,72 @@ function generateSchedule() {
         const priority = getPriority(item.subject);
 
         for (let h = 0; h < item.hours; h++) {
-            let candidates = [];
+            let bestSlot = null;
+            let minScore = Infinity;
 
+            // Перевіряємо всі 5 днів (0-4)
             for (let d = 0; d < 5; d++) {
+                // Перевіряємо слоти з 1 по 8 (0-й ігноруємо)
                 for (let s = 1; s <= 8; s++) {
                     const teacher = state.teachers.find(t => t.id == item.teacherId);
                     
-                    // 1. Перевірка на фізичну зайнятість (вчитель вже веде інший урок або клас зайнятий)
-                    const isOccupied = state.schedule.some(x => x.day === d && x.slot === s && (x.classId == item.classId || x.teacherId == item.teacherId));
+                    // ПЕРЕВІРКА А: Чи не зайнятий вчитель або клас уже?
+                    const isOccupied = state.schedule.some(x => 
+                        x.day === d && x.slot === s && 
+                        (x.classId == item.classId || x.teacherId == item.teacherId)
+                    );
                     if (isOccupied) continue;
 
-                    // 2. Обмеження: не більше 2 однакових предметів на день
-                    const dailyCount = state.schedule.filter(x => x.day === d && x.classId == item.classId && x.subject.toLowerCase().trim() === subNameLower).length;
+                    // ПЕРЕВІРКА Б: Ліміт однакових предметів на день (макс 2)
+                    const dailyCount = state.schedule.filter(x => 
+                        x.day === d && x.classId == item.classId && 
+                        x.subject.toLowerCase().trim() === subNameLower
+                    ).length;
                     if (dailyCount >= 2) continue;
 
-                    // --- РОЗРАХУНОК ВАГИ (SCORE) ---
-                    let score = s * 10; // Базова ціна уроку
+                    // --- ЛОГІКА ШТРАФІВ (Чим менше score, тим кращий слот) ---
+                    
+                    // 1. Базовий штраф за номер уроку (експоненціальний ріст)
+                    // 1 урок = 1, 4 урок = 64, 7 урок = 343, 8 урок = 512
+                    let score = Math.pow(s, 3);
 
-                    // ПЕРЕВІРКА "ЧЕРВОНОЇ ЗОНИ" (твоя умова)
-                    // Якщо слот позначений як false (червоний), ми даємо йому величезний штраф,
-                    // але НЕ видаляємо через continue.
-                    if (teacher && teacher.availability && teacher.availability[d] && teacher.availability[d][s] === false) {
-                        score += 1000; // Це і є наш "високий паркан"
+                    // 2. Штраф за "Червону зону" (небажана зайнятість вчителя)
+                    if (teacher?.availability?.[d]?.[s] === false) {
+                        score += 5000; // Величезний штраф, але не заборона
                     }
 
-                    // Штраф за складний предмет після 4 уроку
-                    if (priority === 1 && s > 4) score += 100;
-                    
-                    // Штраф за 8-й урок (щоб він був менш пріоритетним за 7-й)
-                    if (s === 8) score += 50;
+                    // 3. Штраф за "Дірки" (вікна в розкладі класу)
+                    // Якщо попередній слот порожній — додаємо штраф, щоб уроки "липли" один до одного
+                    if (s > 1) {
+                        const hasLessonAbove = state.schedule.some(x => 
+                            x.day === d && x.slot === s - 1 && x.classId == item.classId
+                        );
+                        if (!hasLessonAbove) score += 200; 
+                    }
 
-                    candidates.push({ d, s, score });
+                    // 4. Штраф за складні предмети наприкінці дня
+                    if (priority === 1 && s > 4) score += 500;
+
+                    // 5. Мінімальний рандом (щоб розклад не був "залізобетонним")
+                    score += Math.random() * 5;
+
+                    // Обираємо найкращий (найдешевший за балами) варіант
+                    if (score < minScore) {
+                        minScore = score;
+                        bestSlot = { d, s };
+                    }
                 }
             }
 
-            // Сортуємо кандидатів за оцінкою + мізерний рандом
-            candidates.sort((a, b) => (a.score + Math.random() * 2) - (b.score + Math.random() * 2));
-
-            if (candidates.length > 0) {
-                const best = candidates[0];
+            // Якщо знайшли хоча б якесь місце — записуємо
+            if (bestSlot) {
                 state.schedule.push({
                     id: 'sch_' + Date.now() + Math.random(),
                     teacherId: item.teacherId,
                     classId: item.classId,
                     subject: item.subject,
-                    day: best.d,
-                    slot: best.s
+                    day: bestSlot.d,
+                    slot: bestSlot.s
                 });
             }
         }
@@ -304,10 +327,9 @@ function generateSchedule() {
     save();
 }
 
-
 function getPriority(subjectName) {
     const sub = subjectName.toLowerCase().trim();
-    for (let key in subjectPriorities) {
+    for (let key in (subjectPriorities || {})) {
         if (sub.includes(key)) return subjectPriorities[key];
     }
     return 2;
