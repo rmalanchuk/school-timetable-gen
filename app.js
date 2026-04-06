@@ -321,6 +321,21 @@ function generateSchedule() {
         }
     });
 
+    if (state.schedule && state.schedule.length > 0) {
+        state.schedule = state.schedule.map(lesson => {
+            // Якщо номер слота менше 8 і ми ще не робили зміщення для цього уроку
+            // (isShifted потрібен, щоб не сунути один і той самий урок двічі)
+            if (lesson.slot < 8 && !lesson.isShifted) {
+                return { 
+                    ...lesson, 
+                    slot: lesson.slot + 1, 
+                    isShifted: true 
+                };
+            }
+            return lesson;
+        });
+    }
+
     // 4. Оновлення інтерфейсу та збереження
     renderAll(); 
     save();
@@ -595,60 +610,56 @@ function renderSchedule() {
     if (!container) return;
 
     if (!state.schedule || state.schedule.length === 0) {
-        container.innerHTML = `<div class="p-10 text-center text-gray-400 bg-white rounded-xl border border-dashed border-gray-300">Розклад ще не згенеровано.</div>`;
+        container.innerHTML = `<div class="p-10 text-center text-gray-400 bg-white rounded-xl border border-dashed border-gray-300">Розклад порожній.</div>`;
         return;
     }
 
     const formatNameForTable = (fullName) => {
         if (!fullName) return "";
         const parts = fullName.trim().split(/\s+/);
-        const surname = parts[0].toUpperCase();
-        const initials = parts.slice(1).map(p => p[0].toUpperCase() + ".").join(" ");
-        return `${surname} ${initials}`;
+        return `${parts[0].toUpperCase()} ${parts.slice(1).map(p => p[0].toUpperCase() + ".").join(" ")}`;
     };
 
     const daysNames = ["Понеділок", "Вівторок", "Середа", "Четвер", "П'ятниця"];
-    
-    let html = `
-        <div class="overflow-x-auto bg-white rounded-xl shadow-md border border-gray-200">
-            <table class="w-full border-collapse min-w-[800px] table-fixed text-[10px]">
-                <thead>
-                    <tr class="bg-slate-100 text-slate-700 uppercase tracking-wider">
-                        <th class="w-12 border-b border-r p-2">День</th>
-                        <th class="w-10 border-b border-r p-2">№</th>
-                        ${state.teachers.map(t => `<th class="border-b border-r p-2 text-center truncate" title="${t.name}">${formatNameForTable(t.name)}</th>`).join('')}
-                    </tr>
-                </thead>
-                <tbody>
-    `;
+    let html = `<div class="overflow-x-auto bg-white rounded-xl shadow-md border border-gray-200">
+        <table class="w-full border-collapse table-fixed text-[10px]">
+            <thead>
+                <tr class="bg-slate-100 text-slate-700 uppercase">
+                    <th class="w-12 border-b border-r p-2">День</th>
+                    <th class="w-10 border-b border-r p-2">№</th>
+                    ${state.teachers.map(t => `<th class="border-b border-r p-2 truncate">${formatNameForTable(t.name)}</th>`).join('')}
+                </tr>
+            </thead>
+            <tbody>`;
 
     daysNames.forEach((dayName, dayIdx) => {
-        for (let slotIdx = 0; slotIdx < 9; slotIdx++) { // Від 0 до 8
+        // Ми завжди малюємо 9 рядків: від 0 до 8
+        for (let slotIdx = 0; slotIdx <= 8; slotIdx++) {
             const isFirstSlot = slotIdx === 0;
-            html += `<tr class="${slotIdx === 8 ? 'border-b-2 border-b-slate-300' : 'border-b border-gray-100'} hover:bg-blue-50/30 transition">`;
+            html += `<tr class="${slotIdx === 8 ? 'border-b-2 border-b-slate-300' : 'border-b border-gray-100'} hover:bg-blue-50/30">`;
 
             if (isFirstSlot) {
-                html += `<td rowspan="9" class="bg-slate-50 border-r border-gray-200 text-center font-bold text-slate-500 uppercase tracking-widest [writing-mode:vertical-lr] rotate-180">${dayName}</td>`;
+                html += `<td rowspan="9" class="bg-slate-50 border-r text-center font-bold text-slate-500 uppercase [writing-mode:vertical-lr] rotate-180">${dayName}</td>`;
             }
 
-            html += `<td class="text-center ${slotIdx === 0 ? 'text-orange-500 font-bold' : 'text-gray-400'} border-r border-gray-100 p-2">${slotIdx}</td>`;
+            // Номер уроку: 0 виділяємо, інші — сірі
+            html += `<td class="text-center border-r p-2 ${slotIdx === 0 ? 'text-orange-600 font-bold bg-orange-50/50' : 'text-gray-400'}">${slotIdx}</td>`;
 
             state.teachers.forEach(teacher => {
                 const lesson = state.schedule.find(s => s.day === dayIdx && s.slot === slotIdx && s.teacherId == teacher.id);
                 const cls = lesson ? state.classes.find(c => c.id == lesson.classId) : null;
-                const displayContent = lesson ? `${cls?.name || ''} ${lesson.subject}` : "";
 
                 html += `
                     <td class="p-1 border-r border-gray-100">
                         <div contenteditable="true" 
                              onblur="updateManualLesson('${teacher.id}', '${dayIdx}', ${slotIdx}, this)"
-                             class="min-h-[30px] p-1 rounded text-center outline-none focus:bg-yellow-50 focus:ring-1 focus:ring-yellow-200 transition-all">
+                             class="min-h-[30px] p-1 rounded text-center outline-none focus:bg-yellow-50">
                             ${lesson ? `
                                 <div class="bg-blue-100 border border-blue-200 rounded py-0.5 shadow-sm pointer-events-none">
                                     <span class="block text-blue-900 font-bold leading-none">${cls?.name || ''}</span>
                                     <span class="text-blue-700 text-[9px] lowercase">${lesson.subject}</span>
                                 </div>
-                            ` : displayContent}
+                            ` : ''}
                         </div>
                     </td>`;
             });
