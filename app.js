@@ -538,13 +538,18 @@ function addWorkload(teacherId) {
     save();
     renderWorkload();
 }
-function removeWorkload(teacherId, index) {
-    const teacher = state.teachers.find(t => t.id === teacherId);
-    if (teacher && teacher.workload) {
-        teacher.workload.splice(index, 1);
-        save();
-        renderWorkload();
-    }
+
+function deleteWorkload(id) {
+    // Підтвердження видалення (опціонально, але корисно)
+    if (!confirm('Видалити цей запис навантаження?')) return;
+
+    // Фільтруємо масив, залишаючи всі записи, крім того, що видаляємо
+    // Використовуємо != для гнучкості типів (рядок/число)
+    state.workload = state.workload.filter(w => w.id != id);
+
+    // Обов'язково викликаємо перемальовування та збереження
+    renderAll();
+    save();
 }
 
 // --- ВІЗУАЛІЗАЦІЯ ТА ДРУК ---
