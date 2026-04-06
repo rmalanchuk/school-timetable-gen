@@ -357,19 +357,23 @@ function renderWorkload() {
     const container = document.getElementById('workload-container');
     if (!container) return;
 
+    // Якщо немає вчителів або класів — показуємо заглушку
     if (!state.teachers || state.teachers.length === 0 || !state.classes || state.classes.length === 0) {
-        container.innerHTML = `<div class="p-10 text-center bg-white rounded-xl border-2 border-dashed border-gray-200 text-gray-400">Додайте вчителів та класи.</div>`;
+        container.innerHTML = `
+            <div class="p-10 text-center bg-white rounded-xl border-2 border-dashed border-gray-200">
+                <p class="text-gray-400 font-medium">Спочатку додайте вчителів та класи у відповідних вкладках.</p>
+            </div>`;
         return;
     }
 
     let html = `<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">`;
 
-    // Використовуємо порядок з основного масиву вчителів
+    // Виводимо вчителів у тому ж порядку, в якому вони додані (без примусового сортування)
     state.teachers.forEach(teacher => {
         const currentWorkload = state.workload || [];
         const teacherWorkload = currentWorkload.filter(w => w.teacherId == teacher.id);
         
-        // Сортуємо додані предмети всередині картки
+        // Сортуємо предмети всередині картки (спочатку за класом, потім за назвою)
         teacherWorkload.sort((a, b) => {
             const classA = state.classes.find(c => c.id == a.classId)?.name || "";
             const classB = state.classes.find(c => c.id == b.classId)?.name || "";
@@ -382,11 +386,11 @@ function renderWorkload() {
         html += `
             <div class="bg-white rounded-2xl shadow-sm border border-gray-100 flex flex-col overflow-hidden">
                 <div class="p-4 bg-slate-50 border-b border-gray-100 flex justify-between items-center">
-                    <h3 class="font-bold text-slate-800 truncate">${teacher.name}</h3>
-                    <span class="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-1 rounded-full">${totalHours}г</span>
+                    <h3 class="font-bold text-slate-800 truncate pr-2">${teacher.name}</h3>
+                    <span class="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-1 rounded-full whitespace-nowrap">${totalHours} год</span>
                 </div>
                 
-                <div class="p-4 space-y-2 overflow-y-auto" style="max-height: 200px; min-height: 50px;">
+                <div class="p-4 space-y-2 overflow-y-auto" style="max-height: 200px; min-height: 60px;">
                     ${teacherWorkload.length > 0 ? teacherWorkload.map(w => {
                         const cls = state.classes.find(c => c.id == w.classId);
                         return `
@@ -397,23 +401,33 @@ function renderWorkload() {
                                 </div>
                                 <div class="flex items-center gap-2">
                                     <span class="font-bold">${w.hours}г</span>
-                                    <button onclick="deleteWorkload('${w.id}')" class="text-gray-300 hover:text-red-500 text-xl line-height-1">&times;</button>
+                                    <button onclick="deleteWorkload('${w.id}')" class="text-gray-300 hover:text-red-500 text-xl font-light">&times;</button>
                                 </div>
                             </div>
                         `;
-                    }).join('') : '<p class="text-center text-gray-300 text-xs py-4">Навантаження не задано</p>'}
+                    }).join('') : '<p class="text-center text-gray-300 text-xs py-4 italic">Навантаження не додано</p>'}
                 </div>
 
-                <div class="p-4 bg-gray-50 border-t border-gray-100 space-y-2">
+                <div class="p-4 bg-gray-50 border-t border-gray-100 space-y-3">
                     <div class="grid grid-cols-2 gap-2">
-                        <select id="sel-cls-${teacher.id}" class="text-sm border rounded-lg p-2 bg-white outline-none focus:border-blue-500">
-                            ${state.classes.map(c => `<option value="${c.id}">${c.name}</option>`).join('')}
-                        </select>
-                        <input type="number" id="hrs-${teacher.id}" value="2" min="1" class="text-sm border rounded-lg p-2 bg-white outline-none focus:border-blue-500">
+                        <div>
+                            <label class="block text-[10px] uppercase font-bold text-gray-400 mb-1 ml-1">Клас</label>
+                            <select id="sel-cls-${teacher.id}" class="w-full text-sm border rounded-lg p-2 bg-white outline-none focus:border-blue-500 shadow-sm transition-all">
+                                ${state.classes.map(c => `<option value="${c.id}">${c.name}</option>`).join('')}
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-[10px] uppercase font-bold text-gray-400 mb-1 ml-1">Години</label>
+                            <input type="number" id="hrs-${teacher.id}" value="2" min="1" max="20" class="w-full text-sm border rounded-lg p-2 bg-white outline-none focus:border-blue-500 shadow-sm transition-all">
+                        </div>
                     </div>
-                    <input type="text" id="sub-${teacher.id}" class="w-full text-sm border rounded-lg p-2 bg-white outline-none focus:border-blue-500" placeholder="Назва предмета">
                     
-                    <button onclick="addWorkloadInline('${teacher.id}')" class="w-full py-2.5 bg-blue-600 text-white text-sm font-bold rounded-lg hover:bg-blue-700 transition shadow-md shadow-blue-100">
+                    <div>
+                        <label class="block text-[10px] uppercase font-bold text-gray-400 mb-1 ml-1">Назва предмета</label>
+                        <input type="text" id="sub-${teacher.id}" class="w-full text-sm border rounded-lg p-2 bg-white outline-none focus:border-blue-500 shadow-sm transition-all" placeholder="напр. Математика">
+                    </div>
+                    
+                    <button onclick="addWorkloadInline('${teacher.id}')" class="w-full py-2.5 bg-blue-600 text-white text-[11px] font-black uppercase tracking-widest rounded-lg hover:bg-blue-700 transition-all shadow-md shadow-blue-100 active:scale-[0.98]">
                         Додати навантаження
                     </button>
                 </div>
