@@ -655,9 +655,7 @@ function printSchedule() {
                     width: 100%; 
                     border-collapse: collapse; 
                     table-layout: fixed; 
-                    /* Зовнішня жирна рамка */
-                    outline: 2.5pt solid #000;
-                    border: none;
+                    border: 2.5pt solid #000; /* Жирна зовнішня рамка */
                 }
                 
                 th, td { 
@@ -666,32 +664,14 @@ function printSchedule() {
                     padding: 0; 
                     box-sizing: border-box; 
                     height: 20px; 
-                    vertical-align: middle;
-                    position: relative;
+                    vertical-align: middle; 
                 }
 
-                /* ЖИРНИЙ НИЗ ХЕДЕРА */
-                thead th { 
-                    border-bottom: 2.5pt solid #000 !important;
-                }
-                
-                /* ПРИБИРАЄМО ЗАЙВІ ЛІНІЇ ПО КРАЯХ, ЩОБ НЕ ПЕРЕКРИВАЛИ РАМКУ ТАБЛИЦІ */
-                th:first-child, td:first-child { border-left: none; }
-                th:last-child, td:last-child { border-right: none; }
-                tr:last-child td { border-bottom: none; }
+                /* ЖИРНА ЛІНІЯ ПІД ХЕДЕРОМ */
+                thead th { border-bottom: 2.5pt solid #000 !important; }
 
-                /* ЖИРНІ ЛІНІЇ МІЖ ДНЯМИ */
-                /* Використовуємо псевдоелемент, щоб лінія була ПОВЕРХ клітинок і ідеально рівна */
-                .day-divider td::after {
-                    content: "";
-                    position: absolute;
-                    bottom: -1.25pt; /* Центруємо відносно стандартної межі */
-                    left: 0;
-                    right: 0;
-                    height: 2.5pt;
-                    background: #000;
-                    z-index: 10;
-                }
+                /* КЛАС ДЛЯ ЖИРНОЇ ЛІНІЇ МІЖ ДНЯМИ */
+                .day-boundary td { border-top: 2.5pt solid #000 !important; }
 
                 .corner-cell { font-size: 7px !important; font-weight: bold; width: 18px; }
                 .col-num { width: 16px; font-size: 8px !important; color: #333; }
@@ -702,8 +682,11 @@ function printSchedule() {
                     transform: rotate(180deg); 
                     font-size: 9px; 
                     width: 18px; 
-                    background-color: #f1f5f9 !important;
+                    background-color: #f1f5f9 !important; 
                 }
+                
+                /* Ховаємо текст дня у повторюваних рядках, щоб виглядало як об'єднане */
+                .day-cell.hidden-text { color: transparent; border-top: none !important; }
 
                 th.teacher-name { 
                     height: 110px; 
@@ -738,37 +721,37 @@ function printSchedule() {
     daysNames.forEach((dayName, dayIdx) => {
         const dayHasZeroSlot = state.schedule.some(s => s.day === dayIdx && s.slot === 0);
         const startSlot = dayHasZeroSlot ? 0 : 1;
-        const totalRowsForDay = 9 - startSlot;
 
         for (let slotIdx = startSlot; slotIdx <= 8; slotIdx++) {
-            // Клас для останнього рядка дня
-            const isLastRowOfDay = (slotIdx === 8);
-            const needsSeparator = (isLastRowOfDay && dayIdx < 4);
-            const rowClass = needsSeparator ? 'class="day-divider"' : '';
-
-            html += `<tr ${rowClass}>`;
+            const isFirstRowOfDay = (slotIdx === startSlot);
+            const needsSeparator = (isFirstRowOfDay && dayIdx > 0);
             
-            if (slotIdx === startSlot) {
-                html += `<td rowspan="${totalRowsForDay}" class="day-cell">${dayName}</td>`;
-            }
+            // Застосовуємо жирну лінію до ВСЬОГО рядка
+            const rowAttr = needsSeparator ? 'class="day-boundary"' : '';
+
+            html += `<tr ${rowAttr}>`;
+            
+            // Замість rowspan малюємо окрему клітинку в кожному рядку
+            // Але текст показуємо тільки в першому рядку дня
+            html += `<td class="day-cell ${!isFirstRowOfDay ? 'hidden-text' : ''}">${dayName}</td>`;
             
             html += `<td class="col-num ${slotIdx === 0 ? 'slot-0' : ''}">${slotIdx}</td>`;
 
             state.teachers.forEach(teacher => {
                 const lesson = state.schedule.find(s => s.day === dayIdx && s.slot === slotIdx && s.teacherId == teacher.id);
-                const slot0Class = slotIdx === 0 ? 'slot-0' : '';
+                const slotClass = slotIdx === 0 ? 'slot-0' : '';
                 
                 if (lesson) {
                     const clsName = state.classes.find(c => c.id == lesson.classId)?.name || '';
                     const rawCode = typeof getSubjectCode === 'function' ? getSubjectCode(lesson.subject) : lesson.subject;
-                    html += `<td class="${slot0Class}">
+                    html += `<td class="${slotClass}">
                         <div class="lesson-box">
                             <span class="class-name">${clsName}</span>
                             <span class="sub-code">${rawCode}</span>
                         </div>
                     </td>`;
                 } else {
-                    html += `<td class="${slot0Class}"></td>`;
+                    html += `<td class="${slotClass}"></td>`;
                 }
             });
             html += `</tr>`;
