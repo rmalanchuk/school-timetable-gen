@@ -650,24 +650,70 @@ function printSchedule() {
             <style>
                 @page { size: A4 portrait; margin: 5mm; }
                 body { font-family: 'Segoe UI', Arial, sans-serif; margin: 0; padding: 0; }
-                table { width: 100%; border-collapse: collapse; table-layout: fixed; border: 1.5pt solid #000; }
-                th, td { border: 0.5pt solid #000; text-align: center; padding: 0; box-sizing: border-box; height: 20px; vertical-align: middle; }
                 
-                /* Жирна лінія під іменами вчителів */
-                thead th { border-bottom: 2.5pt solid #000 !important; }
+                /* Основна таблиця: жирний зовнішній контур */
+                table { 
+                    width: 100%; 
+                    border-collapse: collapse; 
+                    table-layout: fixed; 
+                    border: 2.5pt solid #000; 
+                }
                 
-                /* Клас для жирної лінії В КІНЦІ дня */
-                .day-end-row td { border-bottom: 2.5pt solid #000 !important; }
+                th, td { 
+                    border: 0.5pt solid #000; 
+                    text-align: center; 
+                    padding: 0; 
+                    box-sizing: border-box; 
+                    height: 20px; 
+                    vertical-align: middle; 
+                }
+
+                /* 1. ВИПРАВЛЕННЯ НАКЛАДАННЯ ЗВЕРХУ: жирна лінія тільки знизу thead */
+                thead th { 
+                    border-bottom: 2.5pt solid #000 !important;
+                    border-top: none; 
+                }
+                
+                /* 2. ВИПРАВЛЕННЯ ЛІВОЇ МЕЖІ: форсуємо товщину для перших колонок */
+                td:first-child, th:first-child { 
+                    border-left: none; 
+                }
+
+                /* КЛАС ДЛЯ ЖИРНОЇ ЛІНІЇ МІЖ ДНЯМИ */
+                .day-end-row td { 
+                    border-bottom: 2.5pt solid #000 !important; 
+                }
 
                 .corner-cell { font-size: 7px !important; font-weight: bold; width: 18px; }
                 .col-num { width: 16px; font-size: 8px !important; color: #333; }
-                .day-cell { font-weight: bold; writing-mode: vertical-lr; transform: rotate(180deg); font-size: 9px; width: 18px; background-color: #f1f5f9 !important; }
-                th.teacher-name { height: 110px; writing-mode: vertical-lr; transform: rotate(180deg); white-space: nowrap; font-size: 10px; font-weight: bold; text-align: left; padding: 5px 2px; background-color: #f8fafc !important; }
                 
+                .day-cell { 
+                    font-weight: bold; 
+                    writing-mode: vertical-lr; 
+                    transform: rotate(180deg); 
+                    font-size: 9px; 
+                    width: 18px; 
+                    background-color: #f1f5f9 !important;
+                    /* Важливо для лівої межі */
+                    border-left: none !important;
+                }
+
+                th.teacher-name { 
+                    height: 110px; 
+                    writing-mode: vertical-lr; 
+                    transform: rotate(180deg); 
+                    white-space: nowrap; 
+                    font-size: 10px; 
+                    font-weight: bold; 
+                    text-align: left; 
+                    padding: 5px 2px; 
+                    background-color: #f8fafc !important; 
+                }
+                
+                .slot-0 { background-color: #fffaf0 !important; }
                 .lesson-box { display: block; width: 100%; line-height: 1; }
                 .class-name { font-size: 9px !important; font-weight: 800; display: block; margin-top: 1px; }
                 .sub-code { font-size: 6.5px !important; font-weight: 400; text-transform: lowercase; display: block; margin-bottom: 1px; }
-                .slot-0 { background-color: #fffaf0 !important; }
             </style>
         </head>
         <body>
@@ -688,7 +734,6 @@ function printSchedule() {
         const totalRowsForDay = 9 - startSlot;
 
         for (let slotIdx = startSlot; slotIdx <= 8; slotIdx++) {
-            // Малюємо жирну лінію ЗНИЗУ останнього уроку кожного дня (крім п'ятниці, там межа таблиці)
             const isLastRowOfDay = (slotIdx === 8);
             const needsSeparator = (isLastRowOfDay && dayIdx < 4);
             const rowClass = needsSeparator ? 'class="day-end-row"' : '';
