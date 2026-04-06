@@ -1,13 +1,13 @@
 const subjectPriorities = {
-    // 1 - ВИСОКА СКЛАДНІСТЬ (Ідеально: 2-4 уроки)
+    // 1 - ВИСОКА СКЛАДНІСТЬ
     'алгебр': 1, 'геометр': 1, 'матем': 1, 'фізик': 1, 'хімі': 1, 
     'іноземн': 1, 'англійськ': 1, 'нім': 1,
 
-    // 2 - СЕРЕДНЯ СКЛАДНІСТЬ (Ідеально: 1-5 уроки)
+    // 2 - СЕРЕДНЯ СКЛАДНІСТЬ
     'укр': 2, 'мов': 2, 'літ': 2, 'історі': 2, 'біолог': 2, 'географ': 2, 
-    'право': 2, 'громад': 2, 'етик': 2, 'захист': 2, 'природ': 2, 'інформ': 1,
+    'право': 2, 'громад': 2, 'етик': 2, 'захист': 2, 'природ': 2, 'інформ': 2,
 
-    // 3 - НИЖЧА СКЛАДНІСТЬ / РОЗВАНТАЖЕННЯ (Ідеально: 1 або 5-8 уроки)
+    // 3 - НИЖЧА СКЛАДНІСТЬ
     'фінанс': 3, 'технолог': 3, 'трудов': 3, 'фізкульт': 3, 'мистец': 3, 
     'музик': 3, 'малюв': 3, 'основ': 3, 'добробут': 3, 'stem': 3, 'стеm': 3
 };
@@ -184,7 +184,7 @@ function openAvailability(id) {
 
     // Якщо раніше не було масиву доступності, створюємо його
     if (!teacher.availability) {
-        teacher.availability = Array(5).fill().map(() => Array(state.config.maxLessons).fill(true));
+        teacher.availability = Array(5).fill().map(() => Array(9).fill(true));
     }
 
     document.getElementById('modal-teacher-name').innerText = `Доступність: ${teacher.name}`;
@@ -238,13 +238,10 @@ function toggleAvailability(dayIndex, lessonIndex) {
 // --- ГЕНЕРАТОР РОЗКЛАДУ ---
 
 function generateSchedule() {
-    // 1. Очищення розкладу перед новим циклом
     state.schedule = [];
-    
-    // 2. Підготовка даних (копіюємо, щоб не мутувати оригінал)
     let items = (state.workload || []).map(item => ({ ...item }));
     
-    // Сортуємо предмети за пріоритетом (важкі першими), щоб вони зайняли кращі слоти
+    // Сортуємо: Важкі -> Середні -> Легкі
     items.sort((a, b) => getPriority(a.subject) - getPriority(b.subject));
 
     items.forEach(item => {
@@ -255,53 +252,59 @@ function generateSchedule() {
             let bestSlot = null;
             let minScore = Infinity;
 
-            // Перевіряємо всі 5 днів (0-4)
             for (let d = 0; d < 5; d++) {
-                // Перевіряємо слоти з 1 по 8 (0-й ігноруємо)
                 for (let s = 1; s <= 8; s++) {
-                    const teacher = state.teachers.find(t => t.id == item.teacherId);
+                    const teacher = state.teachers.find(t => String(t.id) === String(item.teacherId));
                     
-                    // ПЕРЕВІРКА А: Чи не зайнятий вчитель або клас уже?
+                    // Перевірка зайнятості (використовуємо String для ID)
                     const isOccupied = state.schedule.some(x => 
                         x.day === d && x.slot === s && 
-                        (x.classId == item.classId || x.teacherId == item.teacherId)
+                        (String(x.classId) === String(item.classId) || String(x.teacherId) === String(item.teacherId))
                     );
                     if (isOccupied) continue;
 
-                    // ПЕРЕВІРКА Б: Ліміт однакових предметів на день (макс 2)
+                    // Ліміт на день (макс 2 однакових)
                     const dailyCount = state.schedule.filter(x => 
-                        x.day === d && x.classId == item.classId && 
+                        x.day === d && String(x.classId) === String(item.classId) && 
                         x.subject.toLowerCase().trim() === subNameLower
                     ).length;
                     if (dailyCount >= 2) continue;
 
-                    // --- ЛОГІКА ШТРАФІВ (Чим менше score, тим кращий слот) ---
-                    
-                    // 1. Базовий штраф за номер уроку (експоненціальний ріст)
-                    // 1 урок = 1, 4 урок = 64, 7 урок = 343, 8 урок = 512
-                    let score = Math.pow(s, 3);
+                    // --- РОЗРАХУНОК SCORE ---
+                    let score = Math.pow(s, 4); 
 
-                    // 2. Штраф за "Червону зону" (небажана зайнятість вчителя)
-                    if (teacher?.availability?.[d]?.[s] === false) {
-                        score += 5000; // Величезний штраф, але не заборона
+                    // 1. АНТИ-СПАРЕНІ УРОКИ (Алгебра 1, Алгебра 2 - НІ)
+                    if (s > 1) {
+                        const prevLesson = state.schedule.find(x => 
+                            x.day === d && x.slot === s - 1 && String(x.classId) === String(item.classId)
+                        );
+                        if (prevLesson && prevLesson.subject.toLowerCase().trim() === subNameLower) {
+                            score += 15000; // Величезний штраф за дублювання підряд
+                        }
                     }
 
-                    // 3. Штраф за "Дірки" (вікна в розкладі класу)
-                    // Якщо попередній слот порожній — додаємо штраф, щоб уроки "липли" один до одного
+                    // 2. Жорсткий штраф за 8-й урок
+                    if (s === 8) score += 30000;
+
+                    // 3. Легкі предмети не на 1-й урок
+                    if (priority === 3 && s === 1) score += 8000;
+                    if (priority === 2 && s === 1) score += 2000;
+
+                    // 4. Червона зона вчителя (враховуємо, що в масиві індекси 0-8)
+                    if (teacher?.availability?.[d]?.[s] === false) {
+                        score += 100000; 
+                    }
+
+                    // 5. Боротьба з вікнами
                     if (s > 1) {
                         const hasLessonAbove = state.schedule.some(x => 
-                            x.day === d && x.slot === s - 1 && x.classId == item.classId
+                            x.day === d && x.slot === s - 1 && String(x.classId) === String(item.classId)
                         );
-                        if (!hasLessonAbove) score += 200; 
+                        if (!hasLessonAbove) score += 5000; 
                     }
 
-                    // 4. Штраф за складні предмети наприкінці дня
-                    if (priority === 1 && s > 4) score += 500;
+                    score += Math.random() * 10;
 
-                    // 5. Мінімальний рандом (щоб розклад не був "залізобетонним")
-                    score += Math.random() * 5;
-
-                    // Обираємо найкращий (найдешевший за балами) варіант
                     if (score < minScore) {
                         minScore = score;
                         bestSlot = { d, s };
@@ -309,12 +312,11 @@ function generateSchedule() {
                 }
             }
 
-            // Якщо знайшли хоча б якесь місце — записуємо
             if (bestSlot) {
                 state.schedule.push({
                     id: 'sch_' + Date.now() + Math.random(),
-                    teacherId: item.teacherId,
-                    classId: item.classId,
+                    teacherId: String(item.teacherId), // Зберігаємо як String
+                    classId: String(item.classId),     // Зберігаємо як String
                     subject: item.subject,
                     day: bestSlot.d,
                     slot: bestSlot.s
@@ -481,10 +483,10 @@ function addWorkloadInline(teacherId) {
         return;
     }
 
-    const newItem = {
-        id: Date.now().toString(), // ID як рядок
-        teacherId: tIdStr,
-        classId: classId,
+   const newItem = {
+        id: String(Date.now()), 
+        teacherId: String(tIdStr),
+        classId: String(classId),
         subject: subject,
         hours: hours
     };
@@ -573,38 +575,35 @@ function deleteWorkload(id) {
 
 function updateManualLesson(teacherId, day, slot, element) {
     const text = element.innerText.trim();
+    const tIdStr = String(teacherId); // Примусово до рядка
     
-    // Видаляємо існуючий урок з цього слота (незалежно від того, чи ми чистимо клітинку, чи пишемо нове)
-    state.schedule = state.schedule.filter(s => !(s.teacherId == teacherId && s.day == day && s.slot == slot));
+    // Видаляємо старий запис (String порівняння)
+    state.schedule = state.schedule.filter(s => 
+        !(String(s.teacherId) === tIdStr && s.day == day && s.slot == slot)
+    );
     
     if (text) {
-        // Логіка: "7-А Математика" -> клас "7-А", предмет "Математика"
         const parts = text.split(' ');
         const className = parts[0];
         const subjectName = parts.slice(1).join(' ') || "урок";
 
-        // Шукаємо клас за назвою
         let cls = state.classes.find(c => c.name.toLowerCase() === className.toLowerCase());
         
-        // Якщо такого класу немає — створюємо його автоматично
         if (!cls) {
             cls = { id: 'c_' + Date.now(), name: className };
             state.classes.push(cls);
         }
 
         state.schedule.push({
-            id: Date.now() + Math.random(),
-            teacherId: teacherId,
+            id: 'sch_m_' + Date.now() + Math.random(),
+            teacherId: tIdStr,
             day: parseInt(day),
             slot: parseInt(slot),
-            classId: cls.id,
+            classId: String(cls.id),
             subject: subjectName
         });
     }
-    
     save();
-    // Не викликаємо renderAll(), щоб не втратити фокус при наборі тексту, 
-    // але дані вже збережені.
 }
 
 function renderSchedule() {
