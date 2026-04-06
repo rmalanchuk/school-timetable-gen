@@ -630,76 +630,62 @@ function renderSchedule() {
 // --- ВІЗУАЛІЗАЦІЯ ТА ДРУК ---
 function printSchedule() {
     if (!state.schedule || state.schedule.length === 0) return;
-
     const printWindow = window.open('', '_blank');
     const days = ["ПОНЕДІЛОК", "ВІВТОРОК", "СЕРЕДА", "ЧЕТВЕР", "П'ЯТНИЦЯ"];
-    const dateStr = new Date().toLocaleDateString('uk-UA');
-
-    const formatName = (n) => n ? n.split(' ')[0] + ' ' + n.split(' ').slice(1).map(p => p[0] + '.').join('') : "";
-
+    
     let html = `
         <html>
         <head>
             <style>
-                @page { size: A4 portrait; margin: 5mm; }
-                body { font-family: sans-serif; margin: 0; }
-                table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-                /* Тільки стандартні бордери, ніякої магії */
-                th, td { border: 1px solid black; text-align: center; font-size: 9px; height: 22px; padding: 0; }
-                
-                /* Жирна лінія тільки для візуального поділу днів */
-                .day-start { border-top: 3px solid black !important; }
-                
-                .day-col { width: 20px; font-weight: bold; writing-mode: vertical-lr; transform: rotate(180deg); }
-                .num-col { width: 15px; background: #eee; }
-                .teacher-header { height: 100px; writing-mode: vertical-lr; transform: rotate(180deg); font-weight: bold; }
+                @page { size: A4 portrait; margin: 10mm; }
+                body { font-family: Arial, sans-serif; font-size: 10px; }
+                table { width: 100%; border-collapse: collapse; table-layout: fixed; margin-bottom: 20px; }
+                th, td { border: 1px solid #000; text-align: center; height: 20px; word-wrap: break-word; }
+                .day-header { background: #eee; font-weight: bold; text-align: left; padding: 5px; border: 2px solid #000; }
+                .t-name { height: 80px; text-align: center; vertical-align: middle; font-weight: bold; font-size: 9px; }
+                .num-col { width: 25px; font-weight: bold; }
                 .slot-0 { background-color: #fff9e6 !important; }
-                .lesson { font-weight: bold; line-height: 1; }
-                .code { font-size: 7px; font-weight: normal; }
             </style>
         </head>
         <body>
-            <h3 style="text-align:center; margin: 5px;">РОЗКЛАД ${dateStr}</h3>
-            <table>
-                <thead>
-                    <tr>
-                        <th>ДН</th><th>№</th>
-                        ${state.teachers.map(t => `<th class="teacher-header">${formatName(t.name)}</th>`).join('')}
-                    </tr>
-                </thead>
-                <tbody>
+            <h2 style="text-align:center">РОЗКЛАД (${new Date().toLocaleDateString()})</h2>
     `;
 
     days.forEach((dayName, dIdx) => {
-        const hasZero = state.schedule.some(s => s.day === dIdx && s.slot === 0);
-        const start = hasZero ? 0 : 1;
+        html += `
+            <table>
+                <thead>
+                    <tr>
+                        <th colspan="${state.teachers.length + 1}" class="day-header">${dayName}</th>
+                    </tr>
+                    <tr>
+                        <th class="num-col">№</th>
+                        ${state.teachers.map(t => `<th class="t-name">${t.name.split(' ')[0]}</th>`).join('')}
+                    </tr>
+                </thead>
+                <tbody>
+        `;
 
-        for (let sIdx = start; sIdx <= 8; sIdx++) {
-            const isFirst = sIdx === start;
-            const rowClass = (isFirst && dIdx > 0) ? 'class="day-start"' : '';
-            
-            html += `<tr ${rowClass}>`;
-            // Виводимо назву дня в кожному рядку (просто ховаємо текст, якщо не перший рядок)
-            html += `<td class="day-col">${isFirst ? dayName : ''}</td>`;
-            html += `<td class="num-col ${sIdx === 0 ? 'slot-0' : ''}">${sIdx}</td>`;
+        for (let sIdx = 0; sIdx <= 8; sIdx++) {
+            const hasAnyInSlot = state.schedule.some(s => s.day === dIdx && s.slot === sIdx);
+            if (sIdx === 0 && !hasAnyInSlot) continue;
 
+            html += `<tr><td class="num-col ${sIdx === 0 ? 'slot-0' : ''}">${sIdx}</td>`;
             state.teachers.forEach(t => {
                 const lesson = state.schedule.find(s => s.day === dIdx && s.slot === sIdx && s.teacherId == t.id);
                 if (lesson) {
                     const cName = state.classes.find(c => c.id == lesson.classId)?.name || '';
-                    html += `<td class="${sIdx === 0 ? 'slot-0' : ''}">
-                        <div class="lesson">${cName}</div>
-                        <div class="code">${lesson.subject}</div>
-                    </td>`;
+                    html += `<td class="${sIdx === 0 ? 'slot-0' : ''}"><b>${cName}</b><br><small>${lesson.subject}</small></td>`;
                 } else {
                     html += `<td class="${sIdx === 0 ? 'slot-0' : ''}"></td>`;
                 }
             });
             html += `</tr>`;
         }
+        html += `</tbody></table>`;
     });
 
-    html += `</tbody></table><script>window.onload=()=>{window.print();window.close();};</script></body></html>`;
+    html += `<script>window.onload=()=>{window.print();window.close();};</script></body></html>`;
     printWindow.document.write(html);
     printWindow.document.close();
 }
