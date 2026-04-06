@@ -648,38 +648,83 @@ function printSchedule() {
         <html>
         <head>
             <style>
-                @page { size: A4 portrait; margin: 5mm; }
-                body { font-family: 'Segoe UI', Arial, sans-serif; margin: 0; padding: 0; }
-                table { width: 100%; border-collapse: collapse; table-layout: fixed; border: 1.5pt solid #000; }
-                th, td { border: 0.5pt solid #000; text-align: center; padding: 0; box-sizing: border-box; height: 20px; vertical-align: middle; }
+                @page { size: A4 portrait; margin: 10mm; }
+                body { font-family: 'Segoe UI', Arial, sans-serif; margin: 0; padding: 0; background: #fff; }
                 
-                /* Жирна лінія під іменами вчителів */
-                thead th { border-bottom: 2.5pt solid #000 !important; }
-                
-                /* Клас для жирної лінії В КІНЦІ дня */
-                .day-end-row td { border-bottom: 2.5pt solid #000 !important; }
+                /* ТАБЛИЦЯ ЯК МОНОЛІТ */
+                .print-wrapper {
+                    background-color: #000; /* Це і є наші лінії */
+                    display: inline-block;
+                    width: 100%;
+                    padding: 2pt; /* Зовнішня жирна рамка */
+                }
 
-                .corner-cell { font-size: 7px !important; font-weight: bold; width: 18px; }
-                .col-num { width: 16px; font-size: 8px !important; color: #333; }
-                .day-cell { font-weight: bold; writing-mode: vertical-lr; transform: rotate(180deg); font-size: 9px; width: 18px; background-color: #f1f5f9 !important; }
-                th.teacher-name { height: 110px; writing-mode: vertical-lr; transform: rotate(180deg); white-space: nowrap; font-size: 10px; font-weight: bold; text-align: left; padding: 5px 2px; background-color: #f8fafc !important; }
+                table { 
+                    width: 100%; 
+                    border-collapse: separate; 
+                    border-spacing: 0.5pt; /* Товщина звичайних ліній */
+                    background-color: #000;
+                    table-layout: fixed;
+                }
                 
-                .lesson-box { display: block; width: 100%; line-height: 1; }
-                .class-name { font-size: 9px !important; font-weight: 800; display: block; margin-top: 1px; }
-                .sub-code { font-size: 6.5px !important; font-weight: 400; text-transform: lowercase; display: block; margin-bottom: 1px; }
-                .slot-0 { background-color: #fffaf0 !important; }
+                th, td { 
+                    background-color: #fff; /* Колір клітинки */
+                    text-align: center; 
+                    padding: 1pt; 
+                    height: 22px; 
+                    vertical-align: middle;
+                    -webkit-print-color-adjust: exact;
+                }
+
+                /* ЖИРНІ РОЗДІЛЬНИКИ (Імітація через висоту) */
+                thead th { 
+                    border-bottom: 2pt solid #000; 
+                }
+
+                .day-boundary td { 
+                    border-top: 2pt solid #000; 
+                }
+
+                .corner-cell { font-size: 7px; font-weight: bold; width: 20px; }
+                .col-num { width: 18px; font-size: 9px; font-weight: bold; }
+                
+                .day-cell { 
+                    font-weight: bold; 
+                    writing-mode: vertical-lr; 
+                    transform: rotate(180deg); 
+                    font-size: 9px; 
+                    width: 20px;
+                }
+
+                th.teacher-name { 
+                    height: 110px; 
+                    writing-mode: vertical-lr; 
+                    transform: rotate(180deg); 
+                    white-space: nowrap; 
+                    font-size: 10px; 
+                    font-weight: bold; 
+                    text-align: left; 
+                    padding: 5px 2px;
+                }
+                
+                .lesson-box { line-height: 1.1; }
+                .class-name { font-size: 10px; font-weight: 800; display: block; }
+                .sub-code { font-size: 7px; text-transform: lowercase; display: block; }
+                
+                .slot-0 { background-color: #fffdf5 !important; }
             </style>
         </head>
         <body>
-            <h2 style="text-align:center; font-size:11px; margin:2mm 0;">ЗВЕДЕНИЙ РОЗКЛАД (${dateStr})</h2>
-            <table>
-                <thead>
-                    <tr>
-                        <th class="corner-cell">ДН</th> <th class="col-num">№</th>
-                        ${state.teachers.map(t => `<th class="teacher-name">${formatName(t.name)}</th>`).join('')}
-                    </tr>
-                </thead>
-                <tbody>
+            <h2 style="text-align:center; font-size:12px; margin: 0 0 4mm 0;">ЗВЕДЕНИЙ РОЗКЛАД (${dateStr})</h2>
+            <div class="print-wrapper">
+                <table>
+                    <thead>
+                        <tr>
+                            <th class="corner-cell">ДН</th> <th class="col-num">№</th>
+                            ${state.teachers.map(t => `<th class="teacher-name">${formatName(t.name)}</th>`).join('')}
+                        </tr>
+                    </thead>
+                    <tbody>
     `;
 
     daysNames.forEach((dayName, dayIdx) => {
@@ -688,14 +733,13 @@ function printSchedule() {
         const totalRowsForDay = 9 - startSlot;
 
         for (let slotIdx = startSlot; slotIdx <= 8; slotIdx++) {
-            // Малюємо жирну лінію ЗНИЗУ останнього уроку кожного дня (крім п'ятниці, там межа таблиці)
-            const isLastRowOfDay = (slotIdx === 8);
-            const needsSeparator = (isLastRowOfDay && dayIdx < 4);
-            const rowClass = needsSeparator ? 'class="day-end-row"' : '';
+            const isFirstRowOfDay = (slotIdx === startSlot);
+            const needsSeparator = (isFirstRowOfDay && dayIdx > 0);
+            const rowClass = needsSeparator ? 'class="day-boundary"' : '';
 
             html += `<tr ${rowClass}>`;
             
-            if (slotIdx === startSlot) {
+            if (isFirstRowOfDay) {
                 html += `<td rowspan="${totalRowsForDay}" class="day-cell">${dayName}</td>`;
             }
             
@@ -703,27 +747,34 @@ function printSchedule() {
 
             state.teachers.forEach(teacher => {
                 const lesson = state.schedule.find(s => s.day === dayIdx && s.slot === slotIdx && s.teacherId == teacher.id);
-                const slot0Class = slotIdx === 0 ? 'slot-0' : '';
+                const isSlot0 = slotIdx === 0 ? 'slot-0' : '';
                 
                 if (lesson) {
                     const clsName = state.classes.find(c => c.id == lesson.classId)?.name || '';
                     const rawCode = typeof getSubjectCode === 'function' ? getSubjectCode(lesson.subject) : lesson.subject;
-                    html += `<td class="${slot0Class}">
+                    html += `<td class="${isSlot0}">
                         <div class="lesson-box">
                             <span class="class-name">${clsName}</span>
                             <span class="sub-code">${rawCode}</span>
                         </div>
                     </td>`;
                 } else {
-                    html += `<td class="${slot0Class}"></td>`;
+                    html += `<td class="${isSlot0}"></td>`;
                 }
             });
             html += `</tr>`;
         }
     });
 
-    html += `</tbody></table>
-    <script>window.onload = function() { setTimeout(() => { window.print(); window.close(); }, 300); };</script>
+    html += `</tbody></table></div>
+    <script>
+        window.onload = function() { 
+            setTimeout(() => { 
+                window.print(); 
+                window.close(); 
+            }, 500); 
+        };
+    </script>
     </body></html>`;
     
     printWindow.document.write(html);
