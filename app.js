@@ -266,7 +266,7 @@ function generateSchedule() {
             for (let d of randomDays) {
                 if (placed) break;
                 
-                for (let s = 0; s < 8; s++) {
+                for (let s = 1; s <= 8; s++) { // Тепер уроки ставляться тільки в слоти 1, 2, 3... 8
                     const teacher = state.teachers.find(t => t.id == item.teacherId);
                     
                     // ==========================================
@@ -321,20 +321,6 @@ function generateSchedule() {
         }
     });
 
-    if (state.schedule && state.schedule.length > 0) {
-        state.schedule = state.schedule.map(lesson => {
-            // Якщо номер слота менше 8 і ми ще не робили зміщення для цього уроку
-            // (isShifted потрібен, щоб не сунути один і той самий урок двічі)
-            if (lesson.slot < 8 && !lesson.isShifted) {
-                return { 
-                    ...lesson, 
-                    slot: lesson.slot + 1, 
-                    isShifted: true 
-                };
-            }
-            return lesson;
-        });
-    }
 
     // 4. Оновлення інтерфейсу та збереження
     renderAll(); 
@@ -633,7 +619,6 @@ function renderSchedule() {
             <tbody>`;
 
     daysNames.forEach((dayName, dayIdx) => {
-        // Залишаємо 9 рядків (0-8)
         for (let slotIdx = 0; slotIdx <= 8; slotIdx++) {
             const isFirstSlot = slotIdx === 0;
             html += `<tr class="${slotIdx === 8 ? 'border-b-2 border-b-slate-300' : 'border-b border-gray-100'} hover:bg-blue-50/30">`;
@@ -645,18 +630,8 @@ function renderSchedule() {
             html += `<td class="text-center border-r p-2 ${slotIdx === 0 ? 'text-orange-600 font-bold bg-orange-50/50' : 'text-gray-400'}">${slotIdx}</td>`;
 
             state.teachers.forEach(teacher => {
-                // --- ОСНОВНА ЗМІНА ТУТ ---
-                let lesson;
-                if (slotIdx === 0) {
-                    // Для 0-го рядка шукаємо ТІЛЬКИ ті уроки, які ми ВЖЕ вписали туди вручну
-                    lesson = state.schedule.find(s => s.day === dayIdx && s.slot === 0 && s.teacherId == teacher.id);
-                } else {
-                    // Для всіх інших (1-8) шукаємо згенеровані уроки, сунувши індекс назад на 1
-                    // Тобто в рядку №1 відобразиться урок, який у базі має slot: 0
-                    lesson = state.schedule.find(s => s.day === dayIdx && s.slot === (slotIdx - 1) && s.teacherId == teacher.id);
-                }
-                // -------------------------
-
+                // Прямий пошук: якщо в базі є урок для цього слота — малюємо його
+                const lesson = state.schedule.find(s => s.day === dayIdx && s.slot === slotIdx && s.teacherId == teacher.id);
                 const cls = lesson ? state.classes.find(c => c.id == lesson.classId) : null;
 
                 html += `
