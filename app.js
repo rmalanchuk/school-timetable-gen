@@ -249,8 +249,7 @@ function generateSchedule() {
     items.forEach(item => {
         const subNameLower = item.subject.toLowerCase().trim();
         
-        // Визначаємо пріоритет предмета (пошук за ключовими словами)
-        let priority = 2; // за замовчуванням середній
+        let priority = 2; 
         for (let key in subjectPriorities) {
             if (subNameLower.includes(key)) {
                 priority = subjectPriorities[key];
@@ -260,57 +259,40 @@ function generateSchedule() {
 
         for (let h = 0; h < item.hours; h++) {
             let placed = false;
-            // Перемішуємо дні для рівномірного розподілу
             const randomDays = [0, 1, 2, 3, 4].sort(() => Math.random() - 0.5);
             
             for (let d of randomDays) {
                 if (placed) break;
                 
-                for (let s = 1; s <= 8; s++) { // Тепер уроки ставляться тільки в слоти 1, 2, 3... 8
+                // ЗМІНА ТУТ: Починаємо з 1, щоб автоматика не чіпала 0-й урок
+                for (let s = 1; s <= 8; s++) { 
                     const teacher = state.teachers.find(t => t.id == item.teacherId);
                     
-                    // ==========================================
-                    // БЛОК ПЕРЕВІРОК ТА ОБМЕЖЕНЬ (CONSTRAINTS)
-                    // ==========================================
-
-                    // 1. ПРІОРИТЕТНІСТЬ (М'ЯКА УМОВА)
-                    // Складні (1) намагаємось не ставити пізно, легкі (3) намагаємось не ставити рано
                     if (priority === 1 && s > 3 && Math.random() > 0.3) continue;
                     if (priority === 3 && s < 3 && Math.random() > 0.3) continue;
-
-                    // 2. ДОСТУПНІСТЬ ВЧИТЕЛЯ (ВКЛАДКА "ВЧИТЕЛІ")
                     if (teacher?.availability?.[d]?.[s] === false) continue;
-                    
-                    // 3. ЗАЙНЯТОСТІ КЛАСУ
                     if (state.schedule.some(x => x.day === d && x.slot === s && x.classId == item.classId)) continue;
-                    
-                    // 4. ЗАЙНЯТОСТІ ВЧИТЕЛЯ (КОНФЛІКТ)
                     if (state.schedule.some(x => x.day === d && x.slot === s && x.teacherId == item.teacherId)) continue;
                     
-                    // 5. БАЛАНС: ОДИНАКОВІ ПРЕДМЕТИ В ОДИН ДЕНЬ
                     const sameToday = state.schedule.some(x => x.day === d && x.classId == item.classId && x.subject.toLowerCase().trim() === subNameLower);
                     if (sameToday && item.hours <= 5) continue;
                     
-                    // 6. СПЕЦІАЛЬНИЙ БАЛАНС: АЛГЕБРА ТА ГЕОМЕТРІЯ
                     const maths = ['алгебр', 'геометр', 'матем'];
                     const isCurrentMath = maths.some(m => subNameLower.includes(m));
-                    
                     if (isCurrentMath) {
                         const hasOtherMathToday = state.schedule.some(x => {
                             const otherSub = x.subject.toLowerCase().trim();
                             const isOtherMath = maths.some(m => otherSub.includes(m));
                             return x.day === d && x.classId == item.classId && isOtherMath && otherSub !== subNameLower;
                         });
-                        
                         if (hasOtherMathToday && item.hours <= 5) continue;
                     }
 
-                    // 7. МІСЦЕ ДЛЯ МАЙБУТНІХ УМОВ (наприклад, вікна або кабінети)
-
-                    // Якщо всі умови пройдено — додаємо урок
                     state.schedule.push({
                         id: Date.now() + Math.random(),
-                        ...item,
+                        teacherId: item.teacherId, // важливо зберігати як є
+                        classId: item.classId,
+                        subject: item.subject,
                         day: d,
                         slot: s
                     });
@@ -321,8 +303,6 @@ function generateSchedule() {
         }
     });
 
-
-    // 4. Оновлення інтерфейсу та збереження
     renderAll(); 
     save();
 }
@@ -565,45 +545,50 @@ function deleteWorkload(id) {
 
 function updateManualLesson(teacherId, day, slot, element) {
     const text = element.innerText.trim();
-    // Видаляємо старий запис для цього слота, якщо він є
-    state.schedule = state.schedule.filter(s => !(s.teacherId == teacherId && s.day == day && s.slot === slot));
+    
+    // Видаляємо існуючий урок з цього слота (незалежно від того, чи ми чистимо клітинку, чи пишемо нове)
+    state.schedule = state.schedule.filter(s => !(s.teacherId == teacherId && s.day == day && s.slot == slot));
     
     if (text) {
-        // Якщо ввели щось на кшталт "9ал", спробуємо розділити
-        const match = text.match(/^(\d+[^\s]*)\s*(.*)$/);
-        const className = match ? match[1] : text;
-        const subject = match ? match[2] : "";
+        // Логіка: "7-А Математика" -> клас "7-А", предмет "Математика"
+        const parts = text.split(' ');
+        const className = parts[0];
+        const subjectName = parts.slice(1).join(' ') || "урок";
 
-        // Знаходимо або створюємо ID класу (це спрощена логіка)
-        let cls = state.classes.find(c => c.name === className);
-        if (!cls && className) {
-            cls = { id: Date.now(), name: className };
+        // Шукаємо клас за назвою
+        let cls = state.classes.find(c => c.name.toLowerCase() === className.toLowerCase());
+        
+        // Якщо такого класу немає — створюємо його автоматично
+        if (!cls) {
+            cls = { id: 'c_' + Date.now(), name: className };
             state.classes.push(cls);
         }
 
         state.schedule.push({
-            teacherId: parseInt(teacherId),
+            id: Date.now() + Math.random(),
+            teacherId: teacherId,
             day: parseInt(day),
             slot: parseInt(slot),
-            classId: cls ? cls.id : null,
-            subject: subject || "резерв"
+            classId: cls.id,
+            subject: subjectName
         });
     }
+    
+    save();
+    // Не викликаємо renderAll(), щоб не втратити фокус при наборі тексту, 
+    // але дані вже збережені.
 }
 
 function renderSchedule() {
     const container = document.getElementById('schedule-output');
     if (!container) return;
 
-    if (!state.schedule || state.schedule.length === 0) {
-        container.innerHTML = `<div class="p-10 text-center text-gray-400 bg-white rounded-xl border border-dashed border-gray-300">Розклад порожній.</div>`;
-        return;
-    }
+    if (!state.schedule) state.schedule = [];
 
     const formatNameForTable = (fullName) => {
         if (!fullName) return "";
         const parts = fullName.trim().split(/\s+/);
-        return `${parts[0].toUpperCase()} ${parts.slice(1).map(p => p[0].toUpperCase() + ".").join(" ")}`;
+        return parts[0].toUpperCase(); // Тільки прізвище для компактності
     };
 
     const daysNames = ["Понеділок", "Вівторок", "Середа", "Четвер", "П'ятниця"];
@@ -620,31 +605,32 @@ function renderSchedule() {
 
     daysNames.forEach((dayName, dayIdx) => {
         for (let slotIdx = 0; slotIdx <= 8; slotIdx++) {
-            const isFirstSlot = slotIdx === 0;
             html += `<tr class="${slotIdx === 8 ? 'border-b-2 border-b-slate-300' : 'border-b border-gray-100'} hover:bg-blue-50/30">`;
 
-            if (isFirstSlot) {
+            if (slotIdx === 0) {
                 html += `<td rowspan="9" class="bg-slate-50 border-r text-center font-bold text-slate-500 uppercase [writing-mode:vertical-lr] rotate-180">${dayName}</td>`;
             }
 
             html += `<td class="text-center border-r p-2 ${slotIdx === 0 ? 'text-orange-600 font-bold bg-orange-50/50' : 'text-gray-400'}">${slotIdx}</td>`;
 
             state.teachers.forEach(teacher => {
-                // Прямий пошук: якщо в базі є урок для цього слота — малюємо його
-                const lesson = state.schedule.find(s => s.day === dayIdx && s.slot === slotIdx && s.teacherId == teacher.id);
+                const lesson = state.schedule.find(s => s.day == dayIdx && s.slot == slotIdx && s.teacherId == teacher.id);
                 const cls = lesson ? state.classes.find(c => c.id == lesson.classId) : null;
+                
+                // Текст для відображення в режимі редагування
+                const cellValue = lesson ? `${cls?.name || ''} ${lesson.subject}`.trim() : '';
 
                 html += `
                     <td class="p-1 border-r border-gray-100">
                         <div contenteditable="true" 
-                             onblur="updateManualLesson('${teacher.id}', '${dayIdx}', ${slotIdx}, this)"
-                             class="min-h-[30px] p-1 rounded text-center outline-none focus:bg-yellow-50">
+                             onblur="updateManualLesson('${teacher.id}', ${dayIdx}, ${slotIdx}, this)"
+                             class="min-h-[35px] p-1 rounded text-center outline-none focus:bg-yellow-50 transition-colors">
                             ${lesson ? `
-                                <div class="bg-blue-100 border border-blue-200 rounded py-0.5 shadow-sm pointer-events-none">
+                                <div class="bg-blue-100 border border-blue-200 rounded py-1 shadow-sm pointer-events-none">
                                     <span class="block text-blue-900 font-bold leading-none">${cls?.name || ''}</span>
                                     <span class="text-blue-700 text-[9px] lowercase">${lesson.subject}</span>
                                 </div>
-                            ` : ''}
+                            ` : cellValue}
                         </div>
                     </td>`;
             });
