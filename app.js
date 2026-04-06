@@ -653,11 +653,11 @@ function printSchedule() {
                 table { width: 100%; border-collapse: collapse; table-layout: fixed; border: 1.5pt solid #000; }
                 th, td { border: 0.5pt solid #000; text-align: center; padding: 0; box-sizing: border-box; height: 20px; vertical-align: middle; }
                 
-                /* ЖИРНА ЛІНІЯ ПІД ХЕДЕРОМ */
-                thead th { border-bottom: 3pt solid #000 !important; }
+                /* Жирна лінія під іменами вчителів */
+                thead th { border-bottom: 2.5pt solid #000 !important; }
                 
-                /* КЛАС ДЛЯ ЖИРНОЇ ЛІНІЇ МІЖ ДНЯМИ */
-                .day-sep { border-top: 3pt solid #000 !important; }
+                /* Клас для жирної лінії В КІНЦІ дня */
+                .day-end-row td { border-bottom: 2.5pt solid #000 !important; }
 
                 .corner-cell { font-size: 7px !important; font-weight: bold; width: 18px; }
                 .col-num { width: 16px; font-size: 8px !important; color: #333; }
@@ -688,22 +688,19 @@ function printSchedule() {
         const totalRowsForDay = 9 - startSlot;
 
         for (let slotIdx = startSlot; slotIdx <= 8; slotIdx++) {
-            // Визначаємо, чи треба малювати товсту лінію зверху (для всіх днів крім першого)
-            const isFirstRowOfDay = (slotIdx === startSlot);
-            const needsSeparator = (isFirstRowOfDay && dayIdx > 0);
-            const sepClass = needsSeparator ? 'day-sep' : '';
+            // Малюємо жирну лінію ЗНИЗУ останнього уроку кожного дня (крім п'ятниці, там межа таблиці)
+            const isLastRowOfDay = (slotIdx === 8);
+            const needsSeparator = (isLastRowOfDay && dayIdx < 4);
+            const rowClass = needsSeparator ? 'class="day-end-row"' : '';
 
-            html += `<tr>`;
+            html += `<tr ${rowClass}>`;
             
-            // Клітинка дня
-            if (isFirstRowOfDay) {
-                html += `<td rowspan="${totalRowsForDay}" class="day-cell ${sepClass}">${dayName}</td>`;
+            if (slotIdx === startSlot) {
+                html += `<td rowspan="${totalRowsForDay}" class="day-cell">${dayName}</td>`;
             }
             
-            // Номер уроку
-            html += `<td class="col-num ${slotIdx === 0 ? 'slot-0' : ''} ${sepClass}">${slotIdx}</td>`;
+            html += `<td class="col-num ${slotIdx === 0 ? 'slot-0' : ''}">${slotIdx}</td>`;
 
-            // Уроки вчителів
             state.teachers.forEach(teacher => {
                 const lesson = state.schedule.find(s => s.day === dayIdx && s.slot === slotIdx && s.teacherId == teacher.id);
                 const slot0Class = slotIdx === 0 ? 'slot-0' : '';
@@ -711,14 +708,14 @@ function printSchedule() {
                 if (lesson) {
                     const clsName = state.classes.find(c => c.id == lesson.classId)?.name || '';
                     const rawCode = typeof getSubjectCode === 'function' ? getSubjectCode(lesson.subject) : lesson.subject;
-                    html += `<td class="${slot0Class} ${sepClass}">
+                    html += `<td class="${slot0Class}">
                         <div class="lesson-box">
                             <span class="class-name">${clsName}</span>
                             <span class="sub-code">${rawCode}</span>
                         </div>
                     </td>`;
                 } else {
-                    html += `<td class="${slot0Class} ${sepClass}"></td>`;
+                    html += `<td class="${slot0Class}"></td>`;
                 }
             });
             html += `</tr>`;
