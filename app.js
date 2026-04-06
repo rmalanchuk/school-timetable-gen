@@ -629,146 +629,77 @@ function renderSchedule() {
 
 // --- ВІЗУАЛІЗАЦІЯ ТА ДРУК ---
 function printSchedule() {
-    if (!state.schedule || state.schedule.length === 0) {
-        alert("Розклад порожній!");
-        return;
-    }
+    if (!state.schedule || state.schedule.length === 0) return;
 
     const printWindow = window.open('', '_blank');
-    const daysNames = ["ПОНЕДІЛОК", "ВІВТОРОК", "СЕРЕДА", "ЧЕТВЕР", "П'ЯТНИЦЯ"];
+    const days = ["ПОНЕДІЛОК", "ВІВТОРОК", "СЕРЕДА", "ЧЕТВЕР", "П'ЯТНИЦЯ"];
     const dateStr = new Date().toLocaleDateString('uk-UA');
 
-    const formatName = (fullName) => {
-        if (!fullName) return "";
-        const parts = fullName.trim().split(/\s+/);
-        return `${parts[0]} ${parts.slice(1).map(p => p[0].toUpperCase() + ".").join(" ")}`;
-    };
+    const formatName = (n) => n ? n.split(' ')[0] + ' ' + n.split(' ').slice(1).map(p => p[0] + '.').join('') : "";
 
     let html = `
         <html>
         <head>
             <style>
-                @page { size: A4 portrait; margin: 10mm; }
-                body { font-family: 'Segoe UI', Arial, sans-serif; margin: 0; padding: 0; }
+                @page { size: A4 portrait; margin: 5mm; }
+                body { font-family: sans-serif; margin: 0; }
+                table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+                /* Тільки стандартні бордери, ніякої магії */
+                th, td { border: 1px solid black; text-align: center; font-size: 9px; height: 22px; padding: 0; }
                 
-                /* Використовуємо border-spacing для створення ідеально рівних ліній через фон */
-                .table-container {
-                    background-color: #000;
-                    padding: 1.5pt; /* Зовнішня рамка */
-                    display: inline-block;
-                    width: 100%;
-                    box-sizing: border-box;
-                }
-
-                table { 
-                    width: 100%; 
-                    border-collapse: separate; 
-                    border-spacing: 0.5pt; /* Товщина внутрішніх ліній */
-                    background-color: #000;
-                    table-layout: fixed;
-                }
+                /* Жирна лінія тільки для візуального поділу днів */
+                .day-start { border-top: 3px solid black !important; }
                 
-                th, td { 
-                    background-color: #fff; 
-                    text-align: center; 
-                    padding: 2px; 
-                    height: 24px; 
-                    vertical-align: middle; 
-                    -webkit-print-color-adjust: exact;
-                }
-
-                /* Робимо жирні лінії через збільшений border-bottom саме для розділення */
-                thead th { border-bottom: 2pt solid #000; }
-                .day-sep td { border-top: 2pt solid #000; }
-
-                .corner-cell { font-size: 7px; font-weight: bold; width: 22px; }
-                .col-num { width: 20px; font-size: 9px; font-weight: bold; }
-                
-                .day-cell { 
-                    font-weight: bold; 
-                    writing-mode: vertical-lr; 
-                    transform: rotate(180deg); 
-                    font-size: 10px; 
-                    width: 22px; 
-                    background-color: #f1f5f9 !important; 
-                }
-
-                th.teacher-name { 
-                    height: 115px; 
-                    writing-mode: vertical-lr; 
-                    transform: rotate(180deg); 
-                    white-space: nowrap; 
-                    font-size: 10px; 
-                    font-weight: bold; 
-                    text-align: left; 
-                    padding: 4px;
-                }
-                
-                .lesson-box { line-height: 1.1; }
-                .class-name { font-size: 10px; font-weight: 800; display: block; }
-                .sub-code { font-size: 7px; display: block; text-transform: lowercase; }
-                .slot-0 { background-color: #fffdf0 !important; }
+                .day-col { width: 20px; font-weight: bold; writing-mode: vertical-lr; transform: rotate(180deg); }
+                .num-col { width: 15px; background: #eee; }
+                .teacher-header { height: 100px; writing-mode: vertical-lr; transform: rotate(180deg); font-weight: bold; }
+                .slot-0 { background-color: #fff9e6 !important; }
+                .lesson { font-weight: bold; line-height: 1; }
+                .code { font-size: 7px; font-weight: normal; }
             </style>
         </head>
         <body>
-            <h2 style="text-align:center; font-size:12px; margin: 0 0 4mm 0;">ЗВЕДЕНИЙ РОЗКЛАД (${dateStr})</h2>
-            <div class="table-container">
-                <table>
-                    <thead>
-                        <tr>
-                            <th class="corner-cell">ДН</th> <th class="col-num">№</th>
-                            ${state.teachers.map(t => `<th class="teacher-name">${formatName(t.name)}</th>`).join('')}
-                        </tr>
-                    </thead>
-                    <tbody>
+            <h3 style="text-align:center; margin: 5px;">РОЗКЛАД ${dateStr}</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>ДН</th><th>№</th>
+                        ${state.teachers.map(t => `<th class="teacher-header">${formatName(t.name)}</th>`).join('')}
+                    </tr>
+                </thead>
+                <tbody>
     `;
 
-    daysNames.forEach((dayName, dayIdx) => {
-        const dayHasZeroSlot = state.schedule.some(s => s.day === dayIdx && s.slot === 0);
-        const startSlot = dayHasZeroSlot ? 0 : 1;
-        const totalRowsForDay = 9 - startSlot;
+    days.forEach((dayName, dIdx) => {
+        const hasZero = state.schedule.some(s => s.day === dIdx && s.slot === 0);
+        const start = hasZero ? 0 : 1;
 
-        for (let slotIdx = startSlot; slotIdx <= 8; slotIdx++) {
-            const isFirstRow = (slotIdx === startSlot);
-            const isBoundary = (isFirstRow && dayIdx > 0);
+        for (let sIdx = start; sIdx <= 8; sIdx++) {
+            const isFirst = sIdx === start;
+            const rowClass = (isFirst && dIdx > 0) ? 'class="day-start"' : '';
             
-            html += `<tr class="${isBoundary ? 'day-sep' : ''}">`;
-            
-            if (isFirstRow) {
-                html += `<td rowspan="${totalRowsForDay}" class="day-cell">${dayName}</td>`;
-            }
-            
-            html += `<td class="col-num ${slotIdx === 0 ? 'slot-0' : ''}">${slotIdx}</td>`;
+            html += `<tr ${rowClass}>`;
+            // Виводимо назву дня в кожному рядку (просто ховаємо текст, якщо не перший рядок)
+            html += `<td class="day-col">${isFirst ? dayName : ''}</td>`;
+            html += `<td class="num-col ${sIdx === 0 ? 'slot-0' : ''}">${sIdx}</td>`;
 
-            state.teachers.forEach(teacher => {
-                const lesson = state.schedule.find(s => s.day === dayIdx && s.slot === slotIdx && s.teacherId == teacher.id);
-                const s0 = slotIdx === 0 ? 'slot-0' : '';
-                
+            state.teachers.forEach(t => {
+                const lesson = state.schedule.find(s => s.day === dIdx && s.slot === sIdx && s.teacherId == t.id);
                 if (lesson) {
-                    const clsName = state.classes.find(c => c.id == lesson.classId)?.name || '';
-                    const rawCode = typeof getSubjectCode === 'function' ? getSubjectCode(lesson.subject) : lesson.subject;
-                    html += `<td class="${s0}">
-                        <div class="lesson-box">
-                            <span class="class-name">${clsName}</span>
-                            <span class="sub-code">${rawCode}</span>
-                        </div>
+                    const cName = state.classes.find(c => c.id == lesson.classId)?.name || '';
+                    html += `<td class="${sIdx === 0 ? 'slot-0' : ''}">
+                        <div class="lesson">${cName}</div>
+                        <div class="code">${lesson.subject}</div>
                     </td>`;
                 } else {
-                    html += `<td class="${s0}"></td>`;
+                    html += `<td class="${sIdx === 0 ? 'slot-0' : ''}"></td>`;
                 }
             });
             html += `</tr>`;
         }
     });
 
-    html += `</tbody></table></div>
-    <script>
-        window.onload = function() { 
-            setTimeout(() => { window.print(); window.close(); }, 400); 
-        };
-    </script>
-    </body></html>`;
-    
+    html += `</tbody></table><script>window.onload=()=>{window.print();window.close();};</script></body></html>`;
     printWindow.document.write(html);
     printWindow.document.close();
 }
