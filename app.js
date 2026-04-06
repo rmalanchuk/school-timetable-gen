@@ -69,6 +69,58 @@ function showTab(tabName) {
     renderAll();
 }
 
+function exportData() {
+    // Готуємо об'єкт із усіма даними
+    const dataStr = JSON.stringify(state, null, 2);
+    const dataBlob = new Blob([dataStr], { type: 'application/json' });
+    const url = URL.createObjectURL(dataBlob);
+    
+    // Створюємо тимчасову кнопку для скачування
+    const link = document.createElement('a');
+    link.href = url;
+    const date = new Date().toISOString().split('T')[0];
+    link.download = `schedule_backup_${date}.json`;
+    
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+}
+
+function importData() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json';
+
+    input.onchange = e => {
+        const file = e.target.files[0];
+        const reader = new FileReader();
+
+        reader.onload = event => {
+            try {
+                const importedState = JSON.parse(event.target.result);
+
+                // Мінімальна перевірка, чи це наш файл
+                if (importedState.teachers && importedState.classes) {
+                    if (confirm('Ви впевнені? Поточні дані будуть замінені даними з файлу.')) {
+                        state = importedState;
+                        save();      // Зберігаємо в LocalStorage
+                        renderAll(); // Оновлюємо інтерфейс
+                        alert('Дані успішно імпортовані!');
+                    }
+                } else {
+                    alert('Помилка: Файл має неправильну структуру.');
+                }
+            } catch (err) {
+                alert('Помилка при читанні файлу: ' + err.message);
+            }
+        };
+        reader.readAsText(file);
+    };
+
+    input.click();
+}
+
 // --- Керування вчителями ---
 
 function addTeacher() {
