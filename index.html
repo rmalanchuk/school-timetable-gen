@@ -13,7 +13,6 @@
             background-color: rgba(255, 255, 255, 0.1); 
             border-bottom: 3px solid #60a5fa; 
         }
-        /* Стиль для компактного відображення уроку в таблиці */
         .lesson-tag {
             display: block;
             line-height: 1.1;
@@ -32,11 +31,21 @@
             <div class="px-6 py-4 flex items-center gap-2 bg-blue-600 font-black tracking-tighter">
                 <span>SS</span><span class="text-blue-200">PRO</span>
             </div>
+            
             <div class="flex flex-1 overflow-x-auto">
                 <button onclick="showTab('teachers')" id="btn-teachers" class="nav-btn active px-6 py-4 hover:bg-slate-800 transition whitespace-nowrap">Вчителі</button>
                 <button onclick="showTab('classes')" id="btn-classes" class="nav-btn px-6 py-4 hover:bg-slate-800 transition whitespace-nowrap">Класи</button>
                 <button onclick="showTab('workload')" id="btn-workload" class="nav-btn px-6 py-4 hover:bg-slate-800 transition whitespace-nowrap">Навантаження</button>
                 <button onclick="showTab('schedule')" id="btn-schedule" class="nav-btn px-6 py-4 hover:bg-slate-800 transition whitespace-nowrap text-green-400 font-bold">Розклад 🚀</button>
+            </div>
+
+            <div class="flex items-center gap-2 px-4 py-2 border-l border-slate-700 bg-slate-800/50">
+                <button onclick="exportData()" title="Зберегти копію у файл" class="p-2 bg-emerald-600 hover:bg-emerald-700 rounded text-xs font-bold transition flex items-center gap-1">
+                    <span>📥</span> <span class="hidden sm:inline">Експорт</span>
+                </button>
+                <button onclick="importData()" title="Завантажити дані з файлу" class="p-2 bg-amber-600 hover:bg-amber-700 rounded text-xs font-bold transition flex items-center gap-1">
+                    <span>📤</span> <span class="hidden sm:inline">Імпорт</span>
+                </button>
             </div>
         </div>
     </nav>
