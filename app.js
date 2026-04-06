@@ -253,7 +253,7 @@ function generateSchedule() {
             let minScore = Infinity;
 
             for (let d = 0; d < 5; d++) {
-                for (let s = 1; s <= 8; s++) {
+                for (let s = 1; s <= 7; s++) {
                     const teacher = state.teachers.find(t => String(t.id) === String(item.teacherId));
                     
                     // Перевірка зайнятості (використовуємо String для ID)
