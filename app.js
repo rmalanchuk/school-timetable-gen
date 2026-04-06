@@ -650,11 +650,11 @@ function printSchedule() {
             <style>
                 @page { size: A4 portrait; margin: 5mm; }
                 body { font-family: 'Segoe UI', Arial, sans-serif; margin: 0; padding: 0; }
-                table { width: 100%; border-collapse: collapse; table-layout: fixed; border: 1.5pt solid #000; }
-                th, td { border: 0.5pt solid #000; text-align: center; padding: 0; box-sizing: border-box; height: 20px; vertical-align: middle; }
+                table { width: 100%; border-collapse: collapse; table-layout: fixed; border: 1pt solid #000; }
+                th, td { border: 0.5pt solid #000; text-align: center; padding: 0; box-sizing: border-box; height: 20px; vertical-align: middle; position: relative; }
                 
-                /* Шапка таблиці */
-                thead tr th { border-bottom: 2.5pt solid #000 !important; }
+                /* Жирна лінія під заголовками вчителів */
+                thead th { border-bottom: 2.5pt solid #000 !important; }
                 
                 .corner-cell { font-size: 7px !important; font-weight: bold; width: 18px; }
                 .col-num { width: 16px; font-size: 8px !important; color: #333; }
@@ -666,10 +666,13 @@ function printSchedule() {
                 .sub-code { font-size: 6.5px !important; font-weight: 400; text-transform: lowercase; display: block; margin-bottom: 1px; }
                 .slot-0 { background-color: #fffaf0 !important; }
                 
-                /* Глобальний фікс для товстої лінії між днями */
-                .day-boundary td, 
-                .day-boundary th { 
-                    border-top: 2.5pt solid #000 !important; 
+                /* Фікс для жирної лінії: малюємо її через box-shadow, щоб вона ігнорувала конфлікти border-collapse */
+                .day-boundary-row td {
+                    box-shadow: inset 0 2.5pt 0 0 #000;
+                }
+                /* Окремий фікс для клітинки дня, яка має rowspan */
+                .day-boundary-cell {
+                    box-shadow: inset 0 2.5pt 0 0 #000, inset 0.5pt 0 0 0 #000;
                 }
             </style>
         </head>
@@ -691,15 +694,14 @@ function printSchedule() {
         const totalRowsForDay = 9 - startSlot;
 
         for (let slotIdx = startSlot; slotIdx <= 8; slotIdx++) {
-            // Клас межі додаємо для першого рядка кожного дня (крім понеділка, бо там лінія від thead)
             const isBoundary = (slotIdx === startSlot && dayIdx > 0);
-            const rowClass = isBoundary ? 'class="day-boundary"' : '';
+            const rowClass = isBoundary ? 'class="day-boundary-row"' : '';
 
             html += `<tr ${rowClass}>`;
             
             if (slotIdx === startSlot) {
-                // Додаємо day-boundary і сюди, щоб верхній край rowspan-клітинки теж був товстим
-                const dayCellClass = isBoundary ? 'day-cell day-boundary' : 'day-cell';
+                // Застосовуємо спеціальний клас до клітинки з назвою дня
+                const dayCellClass = isBoundary ? 'day-cell day-boundary-cell' : 'day-cell';
                 html += `<td rowspan="${totalRowsForDay}" class="${dayCellClass}">${dayName}</td>`;
             }
             
