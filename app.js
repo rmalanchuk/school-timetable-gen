@@ -241,7 +241,7 @@ function generateSchedule() {
     state.schedule = [];
     let items = (state.workload || []).map(item => ({ ...item }));
     
-    // Сортуємо: Важкі -> Середні -> Легкі
+    // Сортуємо: Важкі предмети ставимо першими
     items.sort((a, b) => getPriority(a.subject) - getPriority(b.subject));
 
     items.forEach(item => {
@@ -253,57 +253,54 @@ function generateSchedule() {
             let minScore = Infinity;
 
             for (let d = 0; d < 5; d++) {
-                for (let s = 1; s <= 7; s++) {
+                // ЖОРСТКЕ ОБМЕЖЕННЯ: Автоматика працює ТІЛЬКИ з 1 по 7 уроки
+                for (let s = 1; s <= 7; s++) { 
                     const teacher = state.teachers.find(t => String(t.id) === String(item.teacherId));
                     
-                    // Перевірка зайнятості (використовуємо String для ID)
+                    // 1. Перевірка зайнятості
                     const isOccupied = state.schedule.some(x => 
                         x.day === d && x.slot === s && 
                         (String(x.classId) === String(item.classId) || String(x.teacherId) === String(item.teacherId))
                     );
                     if (isOccupied) continue;
 
-                    // Ліміт на день (макс 2 однакових)
+                    // 2. Ліміт на день (макс 2 однакових)
                     const dailyCount = state.schedule.filter(x => 
                         x.day === d && String(x.classId) === String(item.classId) && 
                         x.subject.toLowerCase().trim() === subNameLower
                     ).length;
                     if (dailyCount >= 2) continue;
 
-                    // --- РОЗРАХУНОК SCORE ---
-                    let score = Math.pow(s, 4); 
+                    // 3. Перевірка "червоної зони" вчителя (ЖОРСТКА ЗАБОРОНА)
+                    // Якщо вчитель помітив цей слот як "Зайнятий", автоматика сюди НЕ ПХНЕ
+                    if (teacher?.availability?.[d]?.[s] === false) continue;
 
-                    // 1. АНТИ-СПАРЕНІ УРОКИ (Алгебра 1, Алгебра 2 - НІ)
+                    // --- РОЗРАХУНОК SCORE ---
+                    let score = Math.pow(s, 3); // Пріоритет верхнім урокам
+
+                    // Штраф за спарені уроки (Алгебра + Алгебра підряд - НІ)
                     if (s > 1) {
                         const prevLesson = state.schedule.find(x => 
                             x.day === d && x.slot === s - 1 && String(x.classId) === String(item.classId)
                         );
                         if (prevLesson && prevLesson.subject.toLowerCase().trim() === subNameLower) {
-                            score += 15000; // Величезний штраф за дублювання підряд
+                            score += 10000;
                         }
                     }
 
-                    // 2. Жорсткий штраф за 8-й урок
-                    if (s === 8) score += 30000;
+                    // Штраф за легкі/середні на 1-му уроці
+                    if (priority === 3 && s === 1) score += 5000;
+                    if (priority === 2 && s === 1) score += 1500;
 
-                    // 3. Легкі предмети не на 1-й урок
-                    if (priority === 3 && s === 1) score += 8000;
-                    if (priority === 2 && s === 1) score += 2000;
-
-                    // 4. Червона зона вчителя (враховуємо, що в масиві індекси 0-8)
-                    if (teacher?.availability?.[d]?.[s] === false) {
-                        score += 100000; 
-                    }
-
-                    // 5. Боротьба з вікнами
+                    // Штраф за "вікна" (уроки мають бути купою зверху)
                     if (s > 1) {
                         const hasLessonAbove = state.schedule.some(x => 
                             x.day === d && x.slot === s - 1 && String(x.classId) === String(item.classId)
                         );
-                        if (!hasLessonAbove) score += 5000; 
+                        if (!hasLessonAbove) score += 4000; 
                     }
 
-                    score += Math.random() * 10;
+                    score += Math.random() * 5;
 
                     if (score < minScore) {
                         minScore = score;
@@ -315,12 +312,14 @@ function generateSchedule() {
             if (bestSlot) {
                 state.schedule.push({
                     id: 'sch_' + Date.now() + Math.random(),
-                    teacherId: String(item.teacherId), // Зберігаємо як String
-                    classId: String(item.classId),     // Зберігаємо як String
+                    teacherId: String(item.teacherId),
+                    classId: String(item.classId),
                     subject: item.subject,
                     day: bestSlot.d,
                     slot: bestSlot.s
                 });
+            } else {
+                console.warn(`Не вдалося знайти вільний слот для: ${item.subject} (${item.classId})`);
             }
         }
     });
