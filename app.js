@@ -664,50 +664,76 @@ function printSchedule() {
         <head>
             <title>Друк розкладу</title>
             <style>
-                @page { size: A4 portrait; margin: 5mm; }
+                @page { 
+                    size: A4 portrait; 
+                    margin: 5mm; 
+                }
                 body { 
-                    font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; 
+                    font-family: 'Segoe UI', sans-serif; 
                     margin: 0; padding: 0; 
                     -webkit-print-color-adjust: exact; 
+                    print-color-adjust: exact;
                 }
-                h2 { text-align: center; font-size: 11px; margin: 2mm 0; color: #334155; }
-                table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+                h2 { text-align: center; font-size: 11px; margin: 2mm 0; }
+                
+                table { 
+                    width: 100%; 
+                    border-collapse: collapse; 
+                    table-layout: fixed; 
+                    /* Додаємо зовнішню межу для всієї таблиці */
+                    border: 1px solid #000;
+                }
+                
                 th, td { 
-                    border: 0.5pt solid #000; 
+                    /* Використовуємо ціле значення 1px для стабільності меж */
+                    border: 1px solid #000; 
                     text-align: center; 
-                    line-height: 1.1;
-                    height: 16px;
-                    padding: 0;
+                    height: 16px; 
+                    padding: 0; 
+                    box-sizing: border-box;
                 }
+                
+                .col-day { width: 18px; }
+                .col-num { width: 22px; }
+            
                 th.teacher-name {
-                    height: 95px;
+                    height: 110px;
                     writing-mode: vertical-lr;
                     transform: rotate(180deg);
                     white-space: nowrap;
                     font-size: 9px;
-                    font-weight: 600;
-                    padding: 4px 2px;
-                    background-color: #f8fafc;
+                    font-weight: bold;
+                    background-color: #f8fafc !important; /* Важливо для друку */
                     text-align: left;
+                    padding: 4px 2px;
                 }
+            
                 .day-cell { 
                     font-weight: bold; 
                     writing-mode: vertical-lr; 
                     transform: rotate(180deg); 
-                    width: 15px; 
                     font-size: 8px;
-                    background: #f1f5f9;
-                    text-transform: uppercase;
+                    background-color: #f1f5f9 !important;
                 }
-                .slot-num { width: 15px; font-size: 7px; color: #64748b; }
-                
-                /* Стилізація коду предмета */
-                .lesson-box { font-size: 9px; font-weight: 700; }
-                .sub-code { 
+            
+                .slot-num { 
                     font-size: 8px; 
+                    font-weight: bold;
+                    background-color: #fff !important;
+                }
+            
+                .lesson-box { 
+                    font-size: 8.5px; 
+                    font-weight: 700; 
+                    line-height: 1; 
+                    width: 100%;
+                    display: block;
+                }
+            
+                .sub-code { 
+                    font-size: 7.5px; 
                     font-weight: 400; 
-                    text-transform: lowercase; /* Малі букви */
-                    color: #1e293b;
+                    text-transform: lowercase; 
                 }
             </style>
         </head>
