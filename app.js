@@ -172,34 +172,33 @@ function toggleAvailability(dayIndex, lessonIndex) {
 // --- ГЕНЕРАТОР РОЗКЛАДУ ---
 
 function generateSchedule() {
-    // Створюємо порожню сітку для кожного класу
     const schedule = {};
     state.classes.forEach(cls => {
         schedule[cls.id] = Array(5).fill(null).map(() => Array(state.config.maxLessons).fill(null));
     });
 
-    // Формуємо плоский список усіх занять, які треба поставити
     let itemsToPlace = [];
     state.teachers.forEach(t => {
+        if (!t.workload) return;
         t.workload.forEach(w => {
             for (let i = 0; i < w.hours; i++) {
                 itemsToPlace.push({
                     teacherId: t.id,
                     teacherName: t.name,
-                    classId: w.classId
+                    classId: w.classId,
+                    subject: w.subject // Додали назву предмета
                 });
             }
         });
     });
 
-    // Сортуємо: спочатку ті класи, де більше всього годин (жадібний підхід)
+    // Сортування (щоб важче було розставити великі навантаження)
     itemsToPlace.sort((a, b) => {
         const countA = itemsToPlace.filter(x => x.classId === a.classId).length;
         const countB = itemsToPlace.filter(x => x.classId === b.classId).length;
         return countB - countA;
     });
 
-    // Проходимо по кожному заняттю і шукаємо йому місце
     itemsToPlace.forEach(item => {
         let placed = false;
         for (let day = 0; day < 5; day++) {
@@ -207,23 +206,30 @@ function generateSchedule() {
             for (let lesson = 0; lesson < state.config.maxLessons; lesson++) {
                 if (placed) break;
 
-                // Перевірка 1: Чи вільний клас?
+                // 1. Чи вільний клас?
                 if (schedule[item.classId][day][lesson] !== null) continue;
 
-                // Перевірка 2: Чи вільний вчитель (не в іншому класі)?
+                // 2. Чи вільний вчитель?
                 const teacherBusy = Object.values(schedule).some(s => 
                     s[day][lesson] && s[day][lesson].teacherId === item.teacherId
                 );
                 if (teacherBusy) continue;
 
-                // Перевірка 3: Чи доступний вчитель за графіком?
+                // 3. Чи доступний вчитель за графіком?
                 const teacher = state.teachers.find(t => t.id === item.teacherId);
                 if (teacher.availability && !teacher.availability[day][lesson]) continue;
 
-                // Якщо все ок — ставимо
+                // 4. НОВЕ ПРАВИЛО: Чи є вже цей предмет у цього класу в цей день?
+                const subjectAlreadyToday = schedule[item.classId][day].some(l => 
+                    l && l.subject === item.subject
+                );
+                if (subjectAlreadyToday) continue;
+
+                // Ставимо урок
                 schedule[item.classId][day][lesson] = {
                     teacherName: item.teacherName,
-                    teacherId: item.teacherId
+                    teacherId: item.teacherId,
+                    subject: item.subject
                 };
                 placed = true;
             }
@@ -232,7 +238,7 @@ function generateSchedule() {
 
     state.schedule = schedule;
     save();
-    renderAll(); // Перемальовуємо все, включаючи нову вкладку розкладу
+    renderAll();
 }
 
 function renderSchedule() {
@@ -307,7 +313,12 @@ function renderSchedule() {
                 html += `
                     <td class="relative border-r border-slate-200 p-1 text-center h-12 min-w-[100px] max-w-[100px] ${cellStyle} ${dayBorder}">
                         ${lessonIndicator}
-                        <span class="block truncate">${assignedClass || ''}</span>
+                        // Шукаємо урок для конкретного вчителя, щоб дістати назву предмета
+                        const lesson = state.schedule[cls.id] ? state.schedule[cls.id][dIdx][lIdx] : null;
+                        if (lesson && lesson.teacherId === teacher.id) {
+                            const subjectCode = getSubjectCode(lesson.subject);
+                            assignedClass = `${cls.name} (${subjectCode})`; // Виведе "7-А (АЛ)" або "10-Б (УМ)"
+                        }
                     </td>
                 `;
             });
@@ -450,9 +461,13 @@ function renderWorkloadItems(teacher) {
 }
 
 function addWorkload(teacherId) {
-    const classId = document.getElementById(`sel-cls-${teacherId}`).value;
-    const subject = document.getElementById(`inp-sub-${teacherId}`).value.trim();
-    const hours = parseInt(document.getElementById(`inp-hrs-${teacherId}`).value);
+    const classSelect = document.getElementById(`sel-cls-${teacherId}`);
+    const subjectInput = document.getElementById(`inp-sub-${teacherId}`);
+    const hoursInput = document.getElementById(`inp-hrs-${teacherId}`);
+
+    const classId = classSelect.value;
+    const subject = subjectInput.value.trim();
+    const hours = parseInt(hoursInput.value);
 
     if (!subject || isNaN(hours) || hours <= 0) {
         alert("Введіть назву предмета та кількість годин");
@@ -460,14 +475,25 @@ function addWorkload(teacherId) {
     }
 
     const teacher = state.teachers.find(t => t.id === teacherId);
-    if (!teacher.workload) teacher.workload = [];
-
-    teacher.workload.push({ classId, subject, hours });
     
-    save();
-    renderWorkload(); // Оновлюємо тільки цю вкладку
-}
+    // Гарантуємо, що workload — це масив
+    if (!Array.isArray(teacher.workload)) {
+        teacher.workload = [];
+    }
 
+    teacher.workload.push({ 
+        classId: classId, 
+        subject: subject, 
+        hours: hours 
+    });
+    
+    // Очищуємо інпути після додавання
+    subjectInput.value = '';
+    hoursInput.value = '';
+
+    save();
+    renderWorkload();
+}
 function removeWorkload(teacherId, index) {
     const teacher = state.teachers.find(t => t.id === teacherId);
     if (teacher && teacher.workload) {
@@ -475,30 +501,6 @@ function removeWorkload(teacherId, index) {
         save();
         renderWorkload();
     }
-}
-
-function addSubjectToWorkload(teacherId) {
-    // Отримуємо значення з нових інпутів
-    const classId = document.getElementById(`select-class-${teacherId}`).value;
-    const subject = document.getElementById(`input-subject-${teacherId}`).value.trim();
-    const hours = parseInt(document.getElementById(`input-hours-${teacherId}`).value);
-
-    // Перевірка
-    if (!subject || isNaN(hours)) return;
-
-    const teacher = state.teachers.find(t => t.id === teacherId);
-    
-    // ОСЬ ТУТ МІНЯЄТЬСЯ СТРУКТУРА:
-    // Раніше ми могли робити push({classId, hours}), 
-    // а тепер додаємо subject:
-    teacher.workload.push({
-        classId: classId,
-        subject: subject,
-        hours: hours
-    });
-
-    save();
-    renderWorkload(); // Перемальовуємо інтерфейс навантаження
 }
 
 // --- ВІЗУАЛІЗАЦІЯ ТА ДРУК ---
@@ -532,7 +534,9 @@ function printSchedule() {
                 state.classes.forEach(cls => {
                     const lesson = state.schedule[cls.id] ? state.schedule[cls.id][dIdx][lIdx] : null;
                     if (lesson && lesson.teacherId === teacher.id) {
-                        cellContent = cls.name.replace(/клас|класу/gi, '').trim();
+                        const shortCls = cls.name.replace(/клас|класу/gi, '').trim();
+                        const subCode = getSubjectCode(lesson.subject);
+                        cellContent = `${shortCls}${subCode}`; // Виведе "7А-АЛ"
                     }
                 });
                 
@@ -607,6 +611,20 @@ function printSchedule() {
     `);
     printWindow.document.close();
     setTimeout(() => { printWindow.print(); }, 500);
+}
+
+function getSubjectCode(subject) {
+    if (!subject) return "";
+    const words = subject.trim().split(/\s+/);
+    
+    if (words.length >= 2) {
+        // Якщо назва з двох слів (Укр мова -> УМ, Інформаційні технології -> ІТ)
+        return (words[0][0] + words[1][0]).toUpperCase();
+    }
+    
+    // Якщо одне слово, беремо перші дві літери (Фізика -> ФІ, Алгебра -> АЛ)
+    // Або можна взяти 3 літери для кращої читаємості (Алг., Гео., Фіз.)
+    return subject.substring(0, 2).toUpperCase();
 }
 
 // Запуск при завантаженні
