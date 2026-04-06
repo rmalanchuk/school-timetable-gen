@@ -668,97 +668,48 @@ function printSchedule() {
     let html = `
         <html>
         <head>
-            <title>Друк розкладу</title>
             <style>
-                @page { 
-                    size: A4 portrait; 
-                    margin: 5mm; 
-                }
-                body { 
-                    font-family: 'Segoe UI', sans-serif; 
-                    margin: 0; padding: 0; 
-                    -webkit-print-color-adjust: exact; 
-                    print-color-adjust: exact;
-                }
-                h2 { text-align: center; font-size: 10px; margin: 2mm 0; text-transform: uppercase; }
-                
-                table { 
-                    width: 100%; 
-                    border-collapse: collapse; 
-                    table-layout: fixed; 
-                    border: 1px solid #000;
-                }
-                
-                th, td { 
-                    border: 1px solid #000; 
-                    text-align: center; 
-                    height: 14px; /* Ще трохи зменшив висоту рядка */
-                    padding: 0; 
-                    box-sizing: border-box;
-                }
-                
-                /* Кутова клітинка ДН/№ — тепер максимально компактна */
-                .corner-cell { 
-                    font-size: 5.5px !important; 
-                    font-weight: bold;
-                    line-height: 1;
-                    width: 18px;
-                }
-            
-                /* Номери уроків (1, 2, 3...) */
-                .col-num { 
-                    width: 20px; 
-                    font-size: 6.5px !important; 
-                    font-weight: bold; 
-                    color: #000;
-                }
-            
+                @page { size: A4 portrait; margin: 5mm; }
+                body { font-family: 'Segoe UI', Arial, sans-serif; margin: 0; padding: 0; }
+                table { width: 100%; border-collapse: collapse; table-layout: fixed; border: 1.5px solid #000; }
+                th, td { border: 1px solid #000; text-align: center; padding: 0; box-sizing: border-box; height: 16px; }
+
+                /* ЗМЕНШУЄМО ТЕХНІЧНИЙ ТЕКСТ (ДН/№ ТА НОМЕРИ) */
+                .corner-cell { font-size: 6px !important; line-height: 1; width: 18px; }
+                .col-num { width: 16px; font-size: 7px !important; color: #444; }
+
+                /* ПРІЗВИЩА ВЧИТЕЛІВ — МАЮТЬ БУТИ ЧИТАБЕЛЬНИМИ */
                 th.teacher-name {
                     height: 110px;
                     writing-mode: vertical-lr;
                     transform: rotate(180deg);
                     white-space: nowrap;
-                    font-size: 8px; /* Компактні імена вчителів */
+                    font-size: 10px; 
                     font-weight: bold;
-                    background-color: #f8fafc !important;
                     text-align: left;
-                    padding: 4px 2px;
+                    padding: 5px 2px;
+                    background-color: #f8fafc !important;
                 }
-            
-                .day-cell { 
-                    font-weight: bold; 
-                    writing-mode: vertical-lr; 
-                    transform: rotate(180deg); 
-                    font-size: 7px;
-                    background-color: #f1f5f9 !important;
-                    width: 18px;
-                }
-            
-                /* Стиль для уроку: 9 клас великий, предмет малий під ним */
-                .lesson-box { 
-                    font-size: 8px !important; /* Розмір цифри класу */
-                    font-weight: 800; 
-                    line-height: 0.9; 
-                    display: flex;
-                    flex-direction: column;
-                    align-items: center;
-                    justify-content: center;
-                }
-            
-                .sub-code { 
-                    font-size: 5.5px !important; /* Дуже малі літери предмета */
-                    font-weight: 400; 
-                    text-transform: lowercase; 
-                    margin-top: 1px;
-                }
+
+                .day-cell { font-weight: bold; writing-mode: vertical-lr; transform: rotate(180deg); font-size: 9px; width: 18px; background-color: #f1f5f9 !important; }
+
+                /* КОНТЕЙНЕР УРОКУ */
+                .lesson-box { display: flex; flex-direction: column; justify-content: center; align-items: center; line-height: 0.9; }
+                
+                /* КЛАС — ВЕЛИКИЙ */
+                .class-name { font-size: 10px !important; font-weight: 800; }
+                
+                /* ПРЕДМЕТ — МАЛЕНЬКИЙ ПІД НИМ */
+                .sub-code { font-size: 7.5px !important; font-weight: 400; text-transform: lowercase; margin-top: 1px; }
             </style>
         </head>
         <body>
-            <h2>ЗВЕДЕНИЙ РОЗКЛАД (СТАНОМ НА ${dateStr})</h2>
+            <h2 style="text-align:center; font-size:11px; margin:2mm 0;">ЗВЕДЕНИЙ РОЗКЛАД (${dateStr})</h2>
             <table>
                 <thead>
                     <tr>
-                        <th colspan="2" style="width: 30px; height: 95px;">ДН/№</th>
+                        <th class="corner-cell">ДН/№</th>
+                        <th class="col-num">№</th>
                         ${state.teachers.map(t => `<th class="teacher-name">${formatName(t.name)}</th>`).join('')}
                     </tr>
                 </thead>
@@ -769,18 +720,19 @@ function printSchedule() {
         for (let slotIdx = 0; slotIdx < 8; slotIdx++) {
             html += `<tr>`;
             if (slotIdx === 0) html += `<td rowspan="8" class="day-cell">${dayName}</td>`;
-            html += `<td class="slot-num">${slotIdx + 1}</td>`;
+            html += `<td class="col-num">${slotIdx + 1}</td>`;
 
             state.teachers.forEach(teacher => {
                 const lesson = state.schedule.find(s => s.day === dayIdx && s.slot === slotIdx && s.teacherId == teacher.id);
                 if (lesson) {
                     const clsName = state.classes.find(c => c.id == lesson.classId)?.name || '';
-                    const code = typeof getSubjectCode === 'function' ? getSubjectCode(lesson.subject) : lesson.subject;
+                    const rawCode = typeof getSubjectCode === 'function' ? getSubjectCode(lesson.subject) : lesson.subject;
                     
-                    // Виділяємо номер класу жирним, а предмет — малими буквами
+                    // ОСЬ ТУТ ЦЯ ЗМІНА ЛОГІКИ: розділяємо на два <span>
                     html += `<td>
                         <div class="lesson-box">
-                            ${clsName}<span class="sub-code">${code}</span>
+                            <span class="class-name">${clsName}</span>
+                            <span class="sub-code">${rawCode}</span>
                         </div>
                     </td>`;
                 } else {
@@ -791,14 +743,7 @@ function printSchedule() {
         }
     });
 
-    html += `</tbody></table>
-            <script>
-                window.onload = function() { 
-                    setTimeout(() => { window.print(); window.close(); }, 300); 
-                };
-            </script>
-        </body></html>`;
-
+    html += `</tbody></table><script>window.onload = function() { setTimeout(() => { window.print(); window.close(); }, 300); };</script></body></html>`;
     printWindow.document.write(html);
     printWindow.document.close();
 }
