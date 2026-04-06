@@ -1,3 +1,17 @@
+const subjectPriorities = {
+    // 1 - ВИСОКА СКЛАДНІСТЬ (Ідеально: 2-4 уроки)
+    'алгебр': 1, 'геометр': 1, 'матем': 1, 'фізик': 1, 'хімі': 1, 
+    'іноземн': 1, 'англійськ': 1, 'нім': 1,
+
+    // 2 - СЕРЕДНЯ СКЛАДНІСТЬ (Ідеально: 1-5 уроки)
+    'укр': 2, 'мов': 2, 'літ': 2, 'історі': 2, 'біолог': 2, 'географ': 2, 
+    'право': 2, 'громад': 2, 'етик': 2, 'захист': 2, 'природ': 2, 'інформ': 1,
+
+    // 3 - НИЖЧА СКЛАДНІСТЬ / РОЗВАНТАЖЕННЯ (Ідеально: 1 або 5-8 уроки)
+    'фінанс': 3, 'технолог': 3, 'трудов': 3, 'фізкульт': 3, 'мистец': 3, 
+    'музик': 3, 'малюв': 3, 'основ': 3, 'добробут': 3, 'stem': 3, 'стеm': 3
+};
+
 // Поточний стан додатку
 let state = {
     activeTab: 'teachers',
@@ -172,62 +186,76 @@ function toggleAvailability(dayIndex, lessonIndex) {
 // --- ГЕНЕРАТОР РОЗКЛАДУ ---
 
 function generateSchedule() {
-    // 1. Очистка
+    // 1. Очистка попереднього розкладу
     state.schedule = [];
     
-    // 2. Підготовка даних
+    // 2. Підготовка та перемішування даних навантаження
     let items = (state.workload || []).map(item => ({ ...item }));
     items = items.sort(() => Math.random() - 0.5);
 
-    // 3. Алгоритм
+    // 3. Основний алгоритм генерації
     items.forEach(item => {
+        const subNameLower = item.subject.toLowerCase().trim();
+        
+        // Визначаємо пріоритет предмета (пошук за ключовими словами)
+        let priority = 2; // за замовчуванням середній
+        for (let key in subjectPriorities) {
+            if (subNameLower.includes(key)) {
+                priority = subjectPriorities[key];
+                break;
+            }
+        }
+
         for (let h = 0; h < item.hours; h++) {
             let placed = false;
+            // Перемішуємо дні для рівномірного розподілу
             const randomDays = [0, 1, 2, 3, 4].sort(() => Math.random() - 0.5);
             
             for (let d of randomDays) {
                 if (placed) break;
+                
                 for (let s = 0; s < 8; s++) {
                     const teacher = state.teachers.find(t => t.id == item.teacherId);
                     
                     // ==========================================
                     // БЛОК ПЕРЕВІРОК ТА ОБМЕЖЕНЬ (CONSTRAINTS)
                     // ==========================================
-                    
-                    // 1. ПЕРЕВІРКА ДОСТУПНОСТІ ВЧИТЕЛЯ (ВКЛАДКА "ВЧИТЕЛІ")
-                    // Якщо клітинка в сітці доступності вчителя позначена як "Зайнятий" (false) — пропускаємо цей слот.
+
+                    // 1. ПРІОРИТЕТНІСТЬ (М'ЯКА УМОВА)
+                    // Складні (1) намагаємось не ставити пізно, легкі (3) намагаємось не ставити рано
+                    if (priority === 1 && s > 3 && Math.random() > 0.3) continue;
+                    if (priority === 3 && s < 3 && Math.random() > 0.3) continue;
+
+                    // 2. ДОСТУПНІСТЬ ВЧИТЕЛЯ (ВКЛАДКА "ВЧИТЕЛІ")
                     if (teacher?.availability?.[d]?.[s] === false) continue;
                     
-                    // 2. ПЕРЕВІРКА ЗАЙНЯТОСТІ КЛАСУ
-                    // Перевіряємо, чи немає вже в цього класу іншого уроку в цей же день і цей же час.
+                    // 3. ЗАЙНЯТОСТІ КЛАСУ
                     if (state.schedule.some(x => x.day === d && x.slot === s && x.classId == item.classId)) continue;
                     
-                    // 3. ПЕРЕВІРКА ЗАЙНЯТОСТІ ВЧИТЕЛЯ (КОНФЛІКТ РОЗКЛАДУ)
-                    // Перевіряємо, чи не викладає цей вчитель вже в іншому класі в цей же час.
+                    // 4. ЗАЙНЯТОСТІ ВЧИТЕЛЯ (КОНФЛІКТ)
                     if (state.schedule.some(x => x.day === d && x.slot === s && x.teacherId == item.teacherId)) continue;
                     
-                    // 4. БАЛАНС: ОДИНАКОВІ ПРЕДМЕТИ В ОДИН ДЕНЬ
-                    // Якщо предметів на тиждень мало (<=5), забороняємо ставити один і той самий предмет двічі на день.
-                    const sameToday = state.schedule.some(x => x.day === d && x.classId == item.classId && x.subject === item.subject);
+                    // 5. БАЛАНС: ОДИНАКОВІ ПРЕДМЕТИ В ОДИН ДЕНЬ
+                    const sameToday = state.schedule.some(x => x.day === d && x.classId == item.classId && x.subject.toLowerCase().trim() === subNameLower);
                     if (sameToday && item.hours <= 5) continue;
                     
-                    // 5. СПЕЦІАЛЬНИЙ БАЛАНС: АЛГЕБРА ТА ГЕОМЕТРІЯ
-                    // Якщо це математика і годин небагато, забороняємо ставити алгебру і геометрію в один день одному класу.
-                    const maths = ['алгебра', 'геометрія', 'алг.', 'геом.'];
-                    const currentSub = item.subject.toLowerCase();
+                    // 6. СПЕЦІАЛЬНИЙ БАЛАНС: АЛГЕБРА ТА ГЕОМЕТРІЯ
+                    const maths = ['алгебр', 'геометр', 'матем'];
+                    const isCurrentMath = maths.some(m => subNameLower.includes(m));
                     
-                    if (maths.includes(currentSub)) {
+                    if (isCurrentMath) {
                         const hasOtherMathToday = state.schedule.some(x => {
-                            const sSub = x.subject.toLowerCase();
-                            return x.day === d && x.classId == item.classId && 
-                                   maths.includes(sSub) && sSub !== currentSub;
+                            const otherSub = x.subject.toLowerCase().trim();
+                            const isOtherMath = maths.some(m => otherSub.includes(m));
+                            return x.day === d && x.classId == item.classId && isOtherMath && otherSub !== subNameLower;
                         });
                         
                         if (hasOtherMathToday && item.hours <= 5) continue;
                     }
-                    
-                    // Місце для майбутніх умов (наприклад, пункт 6: Перевірка максимальної к-сті уроків на день)
 
+                    // 7. МІСЦЕ ДЛЯ МАЙБУТНІХ УМОВ (наприклад, вікна або кабінети)
+
+                    // Якщо всі умови пройдено — додаємо урок
                     state.schedule.push({
                         id: Date.now() + Math.random(),
                         ...item,
@@ -241,7 +269,7 @@ function generateSchedule() {
         }
     });
 
-    // 4. Оновлення
+    // 4. Оновлення інтерфейсу та збереження
     renderAll(); 
     save();
 }
@@ -526,8 +554,9 @@ function renderSchedule() {
                 html += `
                     <td class="border p-1 text-center h-10 ${lesson ? 'bg-blue-50/30' : (isBlocked ? 'bg-gray-100' : '')}">
                         ${lesson ? `
-                            <div class="font-bold text-slate-800 leading-none">${cls}${getSubjectCode(lesson.subject)}</div>
-                            <div class="text-[8px] text-blue-500 mt-0.5 truncate">${lesson.subject}</div>
+                            <div class="font-bold text-slate-800 leading-none">
+                                ${cls}${getSubjectCode(lesson.subject)}
+                            </div>
                         ` : (isBlocked ? '<span class="text-gray-300">✕</span>' : '')}
                     </td>
                 `;
