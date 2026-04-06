@@ -372,36 +372,50 @@ function renderWorkload() {
     const container = document.getElementById('workload-container');
     if (!container) return;
 
+    // Перевіряємо, чи є вчителі та класи
     if (state.teachers.length === 0 || state.classes.length === 0) {
-        container.innerHTML = '<div class="p-10 text-center text-gray-400">Додайте вчителів та класи, щоб налаштувати навантаження.</div>';
+        container.innerHTML = `
+            <div class="p-10 text-center bg-slate-50 rounded-xl border-2 border-dashed border-slate-200">
+                <p class="text-slate-400">Спочатку додайте вчителів та класи у відповідних вкладках.</p>
+            </div>`;
         return;
     }
 
-    let html = '<div class="grid grid-cols-1 md:grid-cols-2 gap-6">';
+    let html = '<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">';
 
     state.teachers.forEach(teacher => {
+        // Рахуємо загальну кількість годин для бейджа
+        const totalHours = (teacher.workload || []).reduce((sum, w) => sum + Number(w.hours), 0);
+
         html += `
-            <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-4">
-                <h3 class="font-bold text-slate-800 border-b pb-2 mb-4 flex justify-between items-center">
-                    ${teacher.name}
-                    <span class="text-xs bg-blue-100 text-blue-600 px-2 py-1 rounded-full">
-                        Всього: ${teacher.workload.reduce((sum, w) => sum + w.hours, 0)} год.
+            <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
+                <div class="p-4 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
+                    <h3 class="font-bold text-slate-800 truncate mr-2">${teacher.name}</h3>
+                    <span class="bg-blue-600 text-white text-[10px] px-2 py-0.5 rounded-full whitespace-nowrap">
+                        ${totalHours} год
                     </span>
-                </h3>
+                </div>
                 
-                <div id="workload-list-${teacher.id}" class="space-y-2 mb-4">
-                    ${renderTeacherWorkloadItems(teacher)}
+                <div class="p-4 flex-grow space-y-2 min-h-[50px]">
+                    ${renderWorkloadItems(teacher)}
                 </div>
 
-                <div class="bg-slate-50 p-3 rounded-lg flex flex-wrap gap-2 items-center">
-                    <select id="select-class-${teacher.id}" class="text-sm p-1 rounded border border-slate-300 outline-none focus:ring-1 focus:ring-blue-500">
-                        ${state.classes.map(c => `<option value="${c.id}">${c.name}</option>`).join('')}
-                    </select>
-                    <input type="text" id="input-subject-${teacher.id}" placeholder="Предмет" class="text-sm p-1 rounded border border-slate-300 w-24 outline-none focus:ring-1 focus:ring-blue-500">
-                    <input type="number" id="input-hours-${teacher.id}" placeholder="Год" min="1" class="text-sm p-1 rounded border border-slate-300 w-12 outline-none">
-                    <button onclick="addSubjectToWorkload('${teacher.id}')" class="bg-blue-600 text-white w-8 h-8 rounded-full hover:bg-blue-700 transition flex items-center justify-center font-bold">
-                        +
-                    </button>
+                <div class="p-4 bg-slate-50 border-t border-slate-200">
+                    <div class="grid grid-cols-1 gap-2">
+                        <select id="sel-cls-${teacher.id}" class="w-full text-xs p-2 rounded border border-slate-300">
+                            ${state.classes.map(c => `<option value="${c.id}">${c.name}</option>`).join('')}
+                        </select>
+                        <div class="flex gap-2">
+                            <input type="text" id="inp-sub-${teacher.id}" placeholder="Предмет" 
+                                class="flex-grow text-xs p-2 rounded border border-slate-300 outline-none focus:border-blue-500">
+                            <input type="number" id="inp-hrs-${teacher.id}" placeholder="Год" 
+                                class="w-14 text-xs p-2 rounded border border-slate-300">
+                            <button onclick="addWorkload('${teacher.id}')" 
+                                class="bg-blue-600 text-white px-3 rounded-lg hover:bg-blue-700 transition font-bold">
+                                +
+                            </button>
+                        </div>
+                    </div>
                 </div>
             </div>
         `;
@@ -411,62 +425,52 @@ function renderWorkload() {
     container.innerHTML = html;
 }
 
-// Допоміжна функція для відображення списку предметів конкретного вчителя
-function renderTeacherWorkloadItems(teacher) {
+function renderWorkloadItems(teacher) {
     if (!teacher.workload || teacher.workload.length === 0) {
-        return '<p class="text-xs text-gray-400 italic">Навантаження ще не додано</p>';
+        return `<p class="text-gray-400 text-[11px] italic text-center py-2">Навантаження не задано</p>`;
     }
 
     return teacher.workload.map((item, idx) => {
-        const targetClass = state.classes.find(c => c.id === item.classId);
+        const cls = state.classes.find(c => c.id === item.classId);
         return `
-            <div class="flex justify-between items-center text-sm bg-blue-50/50 p-2 rounded border border-blue-100">
-                <span class="font-medium text-slate-700">
-                    <span class="text-blue-600 font-bold">${targetClass ? targetClass.name : '???'}</span> — ${item.subject}
-                </span>
+            <div class="flex justify-between items-center bg-white border border-slate-100 p-2 rounded-lg shadow-sm text-xs">
+                <div class="flex flex-col">
+                    <span class="font-bold text-blue-700">${cls ? cls.name : '???'}</span>
+                    <span class="text-slate-500">${item.subject}</span>
+                </div>
                 <div class="flex items-center gap-3">
-                    <span class="font-bold text-slate-600">${item.hours} год.</span>
-                    <button onclick="removeWorkloadItem('${teacher.id}', ${idx})" class="text-red-400 hover:text-red-600">✕</button>
+                    <span class="font-black text-slate-700">${item.hours}г</span>
+                    <button onclick="removeWorkload('${teacher.id}', ${idx})" class="text-red-300 hover:text-red-600 transition">
+                        ✕
+                    </button>
                 </div>
             </div>
         `;
     }).join('');
 }
 
-function addSubjectToWorkload(teacherId) {
-    const classEl = document.getElementById(`select-class-${teacherId}`);
-    const subjectEl = document.getElementById(`input-subject-${teacherId}`);
-    const hoursEl = document.getElementById(`input-hours-${teacherId}`);
-
-    const classId = classEl.value;
-    const subject = subjectEl.value.trim();
-    const hours = parseInt(hoursEl.value);
+function addWorkload(teacherId) {
+    const classId = document.getElementById(`sel-cls-${teacherId}`).value;
+    const subject = document.getElementById(`inp-sub-${teacherId}`).value.trim();
+    const hours = parseInt(document.getElementById(`inp-hrs-${teacherId}`).value);
 
     if (!subject || isNaN(hours) || hours <= 0) {
-        alert("Заповніть назву предмета та кількість годин!");
+        alert("Введіть назву предмета та кількість годин");
         return;
     }
 
     const teacher = state.teachers.find(t => t.id === teacherId);
+    if (!teacher.workload) teacher.workload = [];
+
+    teacher.workload.push({ classId, subject, hours });
     
-    // Додаємо новий предмет у навантаження
-    teacher.workload.push({
-        classId: classId,
-        subject: subject,
-        hours: hours
-    });
-
-    // Очищаємо інпути
-    subjectEl.value = '';
-    hoursEl.value = '';
-
     save();
-    renderWorkload(); // Перемальовуємо тільки вкладку навантаження
+    renderWorkload(); // Оновлюємо тільки цю вкладку
 }
 
-function removeWorkloadItem(teacherId, index) {
+function removeWorkload(teacherId, index) {
     const teacher = state.teachers.find(t => t.id === teacherId);
-    if (teacher) {
+    if (teacher && teacher.workload) {
         teacher.workload.splice(index, 1);
         save();
         renderWorkload();
