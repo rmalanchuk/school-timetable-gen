@@ -653,7 +653,7 @@ function printSchedule() {
                 table { width: 100%; border-collapse: collapse; table-layout: fixed; border: 1.5pt solid #000; }
                 th, td { border: 0.5pt solid #000; text-align: center; padding: 0; box-sizing: border-box; height: 20px; vertical-align: middle; }
                 
-                /* Шапка таблиці з жирним низом */
+                /* Шапка таблиці */
                 thead tr th { border-bottom: 2.5pt solid #000 !important; }
                 
                 .corner-cell { font-size: 7px !important; font-weight: bold; width: 18px; }
@@ -666,8 +666,9 @@ function printSchedule() {
                 .sub-code { font-size: 6.5px !important; font-weight: 400; text-transform: lowercase; display: block; margin-bottom: 1px; }
                 .slot-0 { background-color: #fffaf0 !important; }
                 
-                /* Клас для жирної лінії МІЖ днями */
-                .day-boundary td { 
+                /* Глобальний фікс для товстої лінії між днями */
+                .day-boundary td, 
+                .day-boundary th { 
                     border-top: 2.5pt solid #000 !important; 
                 }
             </style>
@@ -690,15 +691,16 @@ function printSchedule() {
         const totalRowsForDay = 9 - startSlot;
 
         for (let slotIdx = startSlot; slotIdx <= 8; slotIdx++) {
-            // Лінія day-boundary додається ТІЛЬКИ між днями (Вівторок, Середа і т.д.)
-            // Для Понеділка лінію дасть 'thead'
+            // Клас межі додаємо для першого рядка кожного дня (крім понеділка, бо там лінія від thead)
             const isBoundary = (slotIdx === startSlot && dayIdx > 0);
             const rowClass = isBoundary ? 'class="day-boundary"' : '';
 
             html += `<tr ${rowClass}>`;
             
             if (slotIdx === startSlot) {
-                html += `<td rowspan="${totalRowsForDay}" class="day-cell">${dayName}</td>`;
+                // Додаємо day-boundary і сюди, щоб верхній край rowspan-клітинки теж був товстим
+                const dayCellClass = isBoundary ? 'day-cell day-boundary' : 'day-cell';
+                html += `<td rowspan="${totalRowsForDay}" class="${dayCellClass}">${dayName}</td>`;
             }
             
             html += `<td class="col-num ${slotIdx === 0 ? 'slot-0' : ''}">${slotIdx}</td>`;
