@@ -680,18 +680,16 @@ function printSchedule() {
                     -webkit-print-color-adjust: exact; 
                     print-color-adjust: exact;
                 }
-                h2 { text-align: center; font-size: 11px; margin: 2mm 0; }
+                h2 { text-align: center; font-size: 11px; margin: 2mm 0; text-transform: uppercase; }
                 
                 table { 
                     width: 100%; 
                     border-collapse: collapse; 
                     table-layout: fixed; 
-                    /* Додаємо зовнішню межу для всієї таблиці */
                     border: 1px solid #000;
                 }
                 
                 th, td { 
-                    /* Використовуємо ціле значення 1px для стабільності меж */
                     border: 1px solid #000; 
                     text-align: center; 
                     height: 16px; 
@@ -699,19 +697,26 @@ function printSchedule() {
                     box-sizing: border-box;
                 }
                 
-                .col-day { width: 18px; }
-                .col-num { width: 22px; }
+                /* Кутова клітинка ДН/№ */
+                .corner-cell { 
+                    font-size: 7px; /* Зменшено, щоб не вилазило */
+                    font-weight: bold;
+                    line-height: 1;
+                    width: 18px;
+                }
+            
+                .col-num { width: 22px; font-size: 8px; font-weight: bold; }
             
                 th.teacher-name {
-                    height: 110px;
+                    height: 115px; /* Трохи збільшено висоту для довгих Прізвищ */
                     writing-mode: vertical-lr;
                     transform: rotate(180deg);
                     white-space: nowrap;
-                    font-size: 9px;
+                    font-size: 8.5px; /* Трохи зменшено для ініціалів */
                     font-weight: bold;
-                    background-color: #f8fafc !important; /* Важливо для друку */
+                    background-color: #f8fafc !important;
                     text-align: left;
-                    padding: 4px 2px;
+                    padding: 6px 2px; /* Збільшено відступ знизу (який зверху через поворот) */
                 }
             
                 .day-cell { 
@@ -720,26 +725,22 @@ function printSchedule() {
                     transform: rotate(180deg); 
                     font-size: 8px;
                     background-color: #f1f5f9 !important;
-                }
-            
-                .slot-num { 
-                    font-size: 8px; 
-                    font-weight: bold;
-                    background-color: #fff !important;
+                    width: 18px;
                 }
             
                 .lesson-box { 
                     font-size: 8.5px; 
                     font-weight: 700; 
-                    line-height: 1; 
+                    line-height: 1.1; 
                     width: 100%;
                     display: block;
                 }
             
                 .sub-code { 
-                    font-size: 7.5px; 
+                    font-size: 7px; 
                     font-weight: 400; 
                     text-transform: lowercase; 
+                    display: block; /* Перенос на новий рядок для економії ширини */
                 }
             </style>
         </head>
