@@ -249,79 +249,65 @@ function generateSchedule() {
     alert("Розклад успішно збалансовано!");
 }
 
-function renderSchedule() {
-    const container = document.getElementById('schedule-output');
-    if (!container) return;
+function generateSchedule() {
+    state.schedule = [];
+    let itemsToPlace = (state.workload || []).map(item => ({ ...item }));
+    
+    // Перемішуємо для рандомності
+    itemsToPlace = itemsToPlace.sort(() => Math.random() - 0.5);
 
-    if (!state.schedule || Object.keys(state.schedule).length === 0) {
-        container.innerHTML = '<div class="p-10 text-center text-gray-400">Натисніть "Запустити генерацію", щоб отримати таблицю.</div>';
-        return;
-    }
+    const days = [0, 1, 2, 3, 4]; // 0=Пн...4=Пт
+    const maxLessonsPerDay = 8;
 
-    let html = `
-        <div class="relative bg-white rounded-xl shadow-2xl border border-slate-200 overflow-hidden">
-            <div class="overflow-x-auto overflow-y-auto max-h-[80vh]">
-                <table class="w-full border-separate border-spacing-0 text-[11px]">
-                    <thead>
-                        <tr>
-                            <th class="sticky left-0 top-0 z-40 bg-slate-800 text-white border-r border-b border-slate-700 p-2 w-16 min-w-[64px]">День/№</th>
-                            ${state.teachers.map(t => `
-                                <th class="sticky top-0 z-30 bg-slate-800 text-white border-r border-b border-slate-700 p-2 min-w-[100px] max-w-[100px] text-center leading-tight h-16">
-                                    <div class="line-clamp-2 break-words px-1">${t.name}</div>
-                                </th>
-                            `).join('')}
-                        </tr>
-                    </thead>
-                    <tbody>
-    `;
-
-    state.config.days.forEach((day, dIdx) => {
-        for (let lIdx = 0; lIdx < state.config.maxLessons; lIdx++) {
-            const dayBorder = (lIdx === state.config.maxLessons - 1) ? 'border-b-4 border-b-slate-400' : 'border-b border-slate-200';
-            html += `<tr class="hover:bg-slate-50 transition-colors">`;
+    itemsToPlace.forEach(item => {
+        let hoursToPlace = item.hours;
+        
+        for (let h = 0; h < hoursToPlace; h++) {
+            let placed = false;
+            const randomDays = [...days].sort(() => Math.random() - 0.5);
             
-            if (lIdx === 0) {
-                html += `
-                    <td rowspan="${state.config.maxLessons}" class="sticky left-0 z-20 bg-slate-100 border-r border-slate-300 font-bold text-slate-700 text-center align-middle ${dayBorder}">
-                        <div class="rotate-180 [writing-mode:vertical-lr] py-2 uppercase tracking-tighter text-[9px]">${day}</div>
-                    </td>
-                `;
-            }
+            for (let dayIdx of randomDays) {
+                if (placed) break;
 
-            state.teachers.forEach(teacher => {
-                let cellContent = "";
-                let subjectInfo = "";
-                
-                // Шукаємо, чи веде цей вчитель урок у будь-якому класі в цей час
-                state.classes.forEach(cls => {
-                    const lesson = state.schedule[cls.id] ? state.schedule[cls.id][dIdx][lIdx] : null;
-                    if (lesson && lesson.teacherId === teacher.id) {
-                        const code = getSubjectCode(lesson.subject);
-                        cellContent = cls.name;
-                        subjectInfo = code;
+                for (let slotIdx = 0; slotIdx < maxLessonsPerDay; slotIdx++) {
+                    const teacher = state.teachers.find(t => t.id == item.teacherId);
+                    
+                    // Перевірки: зайнятість вчителя, класу, баланс та Алгебра/Геометрія
+                    if (teacher && teacher.availability && teacher.availability[dayIdx] && teacher.availability[dayIdx][slotIdx] === false) continue;
+                    if (state.schedule.some(s => s.day === dayIdx && s.slot === slotIdx && s.classId == item.classId)) continue;
+                    if (state.schedule.some(s => s.day === dayIdx && s.slot === slotIdx && s.teacherId == item.teacherId)) continue;
+
+                    const sameSubToday = state.schedule.some(s => s.day === dayIdx && s.classId == item.classId && s.subject === item.subject);
+                    if (sameSubToday && item.hours <= 5) continue;
+
+                    const mathSubs = ['алгебра', 'геометрія', 'алг.', 'геом.'];
+                    const currentSub = item.subject.toLowerCase();
+                    if (mathSubs.includes(currentSub)) {
+                        const hasOtherMathToday = state.schedule.some(s => {
+                            const sSub = s.subject.toLowerCase();
+                            return s.day === dayIdx && s.classId == item.classId && mathSubs.includes(sSub) && sSub !== currentSub;
+                        });
+                        if (hasOtherMathToday && item.hours <= 5) continue;
                     }
-                });
 
-                const isBlocked = teacher.availability && teacher.availability[dIdx] && !teacher.availability[dIdx][lIdx];
-                let cellStyle = isBlocked ? 'bg-slate-100 text-slate-300' : '';
-                if (cellContent) cellStyle = 'bg-blue-600 text-white font-bold';
-
-                html += `
-                    <td class="relative border-r border-slate-200 p-1 text-center h-12 min-w-[100px] max-w-[100px] ${cellStyle} ${dayBorder}">
-                        <span class="absolute top-0.5 left-0.5 text-[8px] opacity-30">${lIdx + 1}</span>
-                        <div class="leading-tight">
-                            <div class="text-[11px]">${cellContent}</div>
-                            <div class="text-[9px] font-normal opacity-90">${subjectInfo}</div>
-                        </div>
-                    </td>
-                `;
-            });
-            html += `</tr>`;
+                    state.schedule.push({
+                        id: Date.now() + Math.random(),
+                        teacherId: item.teacherId,
+                        classId: item.classId,
+                        subject: item.subject,
+                        day: dayIdx,
+                        slot: slotIdx
+                    });
+                    placed = true;
+                    break;
+                }
+            }
         }
     });
 
-    html += `</tbody></table></div></div>`;
-    container.innerHTML = html;
+    // Оновлюємо інтерфейс та зберігаємо дані
+    renderAll();
+    save();
 }
 
 function renderAll() {
