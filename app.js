@@ -12,9 +12,20 @@ let state = {
 // --- Ініціалізація та збереження ---
 
 function init() {
-    const saved = localStorage.getItem('school_schedule_data');
-    if (saved) {
-        state = JSON.parse(saved);
+    try {
+        const saved = localStorage.getItem('school_schedule_data');
+        if (saved) {
+            const parsed = JSON.parse(saved);
+            // Мінімальна перевірка, що дані валідні
+            if (parsed && typeof parsed === 'object') {
+                state = parsed;
+                console.log("Дані успішно завантажено");
+            }
+        }
+    } catch (e) {
+        console.error("Помилка при читанні з localStorage:", e);
+        // Якщо дані биті, ми їх не перетираємо одразу, 
+        // щоб ти міг спробувати витягнути їх через консоль
     }
     renderAll();
 }
@@ -362,62 +373,128 @@ function renderWorkload() {
     if (!container) return;
 
     if (state.teachers.length === 0 || state.classes.length === 0) {
-        container.innerHTML = '<div class="p-10 text-center text-gray-400">Додайте вчителів та класи для формування матриці.</div>';
+        container.innerHTML = '<div class="p-10 text-center text-gray-400">Додайте вчителів та класи, щоб налаштувати навантаження.</div>';
         return;
     }
 
-    let html = `
-        <table class="w-full border-collapse">
-            <thead>
-                <tr class="bg-slate-100 text-slate-700">
-                    <th class="border p-3 text-left">Вчитель</th>
-                    ${state.classes.map(c => `<th class="border p-3 text-center w-24">${c.name}</th>`).join('')}
-                </tr>
-            </thead>
-            <tbody>
-    `;
+    let html = '<div class="grid grid-cols-1 md:grid-cols-2 gap-6">';
 
     state.teachers.forEach(teacher => {
         html += `
-            <tr class="hover:bg-blue-50 transition">
-                <td class="border p-3 font-semibold text-slate-800 bg-gray-50">${teacher.name}</td>
-                ${state.classes.map(cls => {
-                    const work = teacher.workload.find(w => w.classId === cls.id);
-                    const hours = work ? work.hours : '';
-                    return `
-                        <td class="border p-0">
-                            <input type="number" min="0" max="40" 
-                                value="${hours}" 
-                                onchange="updateWorkload('${teacher.id}', '${cls.id}', this.value)"
-                                placeholder="0"
-                                class="w-full text-center py-3 px-2 focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition appearance-none">
-                        </td>
-                    `;
-                }).join('')}
-            </tr>
+            <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-4">
+                <h3 class="font-bold text-slate-800 border-b pb-2 mb-4 flex justify-between items-center">
+                    ${teacher.name}
+                    <span class="text-xs bg-blue-100 text-blue-600 px-2 py-1 rounded-full">
+                        Всього: ${teacher.workload.reduce((sum, w) => sum + w.hours, 0)} год.
+                    </span>
+                </h3>
+                
+                <div id="workload-list-${teacher.id}" class="space-y-2 mb-4">
+                    ${renderTeacherWorkloadItems(teacher)}
+                </div>
+
+                <div class="bg-slate-50 p-3 rounded-lg flex flex-wrap gap-2 items-center">
+                    <select id="select-class-${teacher.id}" class="text-sm p-1 rounded border border-slate-300 outline-none focus:ring-1 focus:ring-blue-500">
+                        ${state.classes.map(c => `<option value="${c.id}">${c.name}</option>`).join('')}
+                    </select>
+                    <input type="text" id="input-subject-${teacher.id}" placeholder="Предмет" class="text-sm p-1 rounded border border-slate-300 w-24 outline-none focus:ring-1 focus:ring-blue-500">
+                    <input type="number" id="input-hours-${teacher.id}" placeholder="Год" min="1" class="text-sm p-1 rounded border border-slate-300 w-12 outline-none">
+                    <button onclick="addSubjectToWorkload('${teacher.id}')" class="bg-blue-600 text-white w-8 h-8 rounded-full hover:bg-blue-700 transition flex items-center justify-center font-bold">
+                        +
+                    </button>
+                </div>
+            </div>
         `;
     });
 
-    html += '</tbody></table>';
+    html += '</div>';
     container.innerHTML = html;
 }
 
-function updateWorkload(teacherId, classId, value) {
-    const teacher = state.teachers.find(t => t.id === teacherId);
-    if (!teacher) return;
-
-    const hours = parseInt(value) || 0;
-    const workIndex = teacher.workload.findIndex(w => w.classId === classId);
-
-    if (workIndex > -1) {
-        if (hours === 0) teacher.workload.splice(workIndex, 1);
-        else teacher.workload[workIndex].hours = hours;
-    } else if (hours > 0) {
-        teacher.workload.push({ classId, hours });
+// Допоміжна функція для відображення списку предметів конкретного вчителя
+function renderTeacherWorkloadItems(teacher) {
+    if (!teacher.workload || teacher.workload.length === 0) {
+        return '<p class="text-xs text-gray-400 italic">Навантаження ще не додано</p>';
     }
 
+    return teacher.workload.map((item, idx) => {
+        const targetClass = state.classes.find(c => c.id === item.classId);
+        return `
+            <div class="flex justify-between items-center text-sm bg-blue-50/50 p-2 rounded border border-blue-100">
+                <span class="font-medium text-slate-700">
+                    <span class="text-blue-600 font-bold">${targetClass ? targetClass.name : '???'}</span> — ${item.subject}
+                </span>
+                <div class="flex items-center gap-3">
+                    <span class="font-bold text-slate-600">${item.hours} год.</span>
+                    <button onclick="removeWorkloadItem('${teacher.id}', ${idx})" class="text-red-400 hover:text-red-600">✕</button>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+function addSubjectToWorkload(teacherId) {
+    const classEl = document.getElementById(`select-class-${teacherId}`);
+    const subjectEl = document.getElementById(`input-subject-${teacherId}`);
+    const hoursEl = document.getElementById(`input-hours-${teacherId}`);
+
+    const classId = classEl.value;
+    const subject = subjectEl.value.trim();
+    const hours = parseInt(hoursEl.value);
+
+    if (!subject || isNaN(hours) || hours <= 0) {
+        alert("Заповніть назву предмета та кількість годин!");
+        return;
+    }
+
+    const teacher = state.teachers.find(t => t.id === teacherId);
+    
+    // Додаємо новий предмет у навантаження
+    teacher.workload.push({
+        classId: classId,
+        subject: subject,
+        hours: hours
+    });
+
+    // Очищаємо інпути
+    subjectEl.value = '';
+    hoursEl.value = '';
+
     save();
-    // Не викликаємо renderAll(), щоб не "стрибав" фокус з інпуту при введенні
+    renderWorkload(); // Перемальовуємо тільки вкладку навантаження
+}
+
+function removeWorkloadItem(teacherId, index) {
+    const teacher = state.teachers.find(t => t.id === teacherId);
+    if (teacher) {
+        teacher.workload.splice(index, 1);
+        save();
+        renderWorkload();
+    }
+}
+
+function addSubjectToWorkload(teacherId) {
+    // Отримуємо значення з нових інпутів
+    const classId = document.getElementById(`select-class-${teacherId}`).value;
+    const subject = document.getElementById(`input-subject-${teacherId}`).value.trim();
+    const hours = parseInt(document.getElementById(`input-hours-${teacherId}`).value);
+
+    // Перевірка
+    if (!subject || isNaN(hours)) return;
+
+    const teacher = state.teachers.find(t => t.id === teacherId);
+    
+    // ОСЬ ТУТ МІНЯЄТЬСЯ СТРУКТУРА:
+    // Раніше ми могли робити push({classId, hours}), 
+    // а тепер додаємо subject:
+    teacher.workload.push({
+        classId: classId,
+        subject: subject,
+        hours: hours
+    });
+
+    save();
+    renderWorkload(); // Перемальовуємо інтерфейс навантаження
 }
 
 // --- ВІЗУАЛІЗАЦІЯ ТА ДРУК ---
