@@ -671,14 +671,15 @@ function printSchedule() {
             <style>
                 @page { size: A4 portrait; margin: 5mm; }
                 body { font-family: 'Segoe UI', Arial, sans-serif; margin: 0; padding: 0; }
-                table { width: 100%; border-collapse: collapse; table-layout: fixed; border: 1.5px solid #000; }
-                th, td { border: 1px solid #000; text-align: center; padding: 0; box-sizing: border-box; height: 16px; }
-
-                /* ЗМЕНШУЄМО ТЕХНІЧНИЙ ТЕКСТ (ДН/№ ТА НОМЕРИ) */
-                .corner-cell { font-size: 6px !important; line-height: 1; width: 18px; }
-                .col-num { width: 16px; font-size: 7px !important; color: #444; }
-
-                /* ПРІЗВИЩА ВЧИТЕЛІВ — МАЮТЬ БУТИ ЧИТАБЕЛЬНИМИ */
+                table { width: 100%; border-collapse: collapse; table-layout: fixed; border: 1.2pt solid #000; }
+                th, td { border: 1pt solid #000; text-align: center; padding: 0; box-sizing: border-box; }
+            
+                /* Ліва частина (ДН/№ та номери) — залишаємо як ти просив */
+                .corner-cell { font-size: 6px !important; line-height: 1; width: 18px; padding: 1px !important; }
+                .col-num { width: 16px; font-size: 7px !important; color: #444; height: 18px; }
+                .day-cell { font-weight: bold; writing-mode: vertical-lr; transform: rotate(180deg); font-size: 9px; width: 18px; background-color: #f1f5f9 !important; }
+            
+                /* Прізвища вчителів */
                 th.teacher-name {
                     height: 110px;
                     writing-mode: vertical-lr;
@@ -690,17 +691,26 @@ function printSchedule() {
                     padding: 5px 2px;
                     background-color: #f8fafc !important;
                 }
-
-                .day-cell { font-weight: bold; writing-mode: vertical-lr; transform: rotate(180deg); font-size: 9px; width: 18px; background-color: #f1f5f9 !important; }
-
-                /* КОНТЕЙНЕР УРОКУ */
-                .lesson-box { display: flex; flex-direction: column; justify-content: center; align-items: center; line-height: 0.9; }
+            
+                /* УРОКИ — ВИПРАВЛЕННЯ НАПОЛЗАННЯ */
+                .lesson-box { 
+                    padding: 2px 0; /* Відступи від верхньої та нижньої межі клітинки */
+                    line-height: 1.1; 
+                }
                 
-                /* КЛАС — ВЕЛИКИЙ */
-                .class-name { font-size: 10px !important; font-weight: 800; }
+                .class-name { 
+                    font-size: 10px !important; 
+                    font-weight: 800; 
+                    display: block; /* Клас на окремому рядку */
+                }
                 
-                /* ПРЕДМЕТ — МАЛЕНЬКИЙ ПІД НИМ */
-                .sub-code { font-size: 7.5px !important; font-weight: 400; text-transform: lowercase; margin-top: 1px; }
+                .sub-code { 
+                    font-size: 7.5px !important; 
+                    font-weight: 400; 
+                    text-transform: lowercase; 
+                    display: block; /* Предмет під класом */
+                    margin-top: 1px;
+                }
             </style>
         </head>
         <body>
