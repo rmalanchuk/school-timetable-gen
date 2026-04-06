@@ -172,70 +172,67 @@ function toggleAvailability(dayIndex, lessonIndex) {
 // --- ГЕНЕРАТОР РОЗКЛАДУ ---
 
 function generateSchedule() {
+    // 1. Очистка
     state.schedule = [];
-    let itemsToPlace = (state.workload || []).map(item => ({ ...item }));
     
-    // Перемішуємо для рандомності
-    itemsToPlace = itemsToPlace.sort(() => Math.random() - 0.5);
+    // 2. Підготовка даних
+    let items = (state.workload || []).map(item => ({ ...item }));
+    items = items.sort(() => Math.random() - 0.5);
 
-    const days = [0, 1, 2, 3, 4]; // 0=Пн, 1=Вт, 2=Ср, 3=Чт, 4=Пт
-    const maxLessonsPerDay = 8;
-
-    itemsToPlace.forEach(item => {
-        let hoursToPlace = item.hours;
-        
-        for (let h = 0; h < hoursToPlace; h++) {
+    // 3. Алгоритм
+    items.forEach(item => {
+        for (let h = 0; h < item.hours; h++) {
             let placed = false;
-            const randomDays = [...days].sort(() => Math.random() - 0.5);
+            const randomDays = [0, 1, 2, 3, 4].sort(() => Math.random() - 0.5);
             
-            for (let dayIdx of randomDays) {
+            for (let d of randomDays) {
                 if (placed) break;
-
-                for (let slotIdx = 0; slotIdx < maxLessonsPerDay; slotIdx++) {
-                    const dayNum = dayIdx; // для читаємості
-                    const slotNum = slotIdx;
-
-                    // 1. ПЕРЕВІРКА ЗАЙНЯТОСТІ ВЧИТЕЛЯ (Вкладка "Вчителі")
+                for (let s = 0; s < 8; s++) {
                     const teacher = state.teachers.find(t => t.id == item.teacherId);
-                    if (teacher && teacher.availability && teacher.availability[dayNum] && teacher.availability[dayNum][slotNum] === false) {
-                        continue; // Якщо клітинка червона (false) — пропускаємо
-                    }
-
-                    // 2. ЧИ ВІЛЬНИЙ КЛАС?
-                    const isClassBusy = state.schedule.some(s => s.day === dayNum && s.slot === slotNum && s.classId == item.classId);
-                    if (isClassBusy) continue;
-
-                    // 3. ЧИ ВІЛЬНИЙ ВЧИТЕЛЬ?
-                    const isTeacherBusy = state.schedule.some(s => s.day === dayNum && s.slot === slotNum && s.teacherId == item.teacherId);
-                    if (isTeacherBusy) continue;
-
-                    // 4. БАЛАНС: ОДНАКОВІ ПРЕДМЕТИ В ОДИН ДЕНЬ
-                    // Якщо годин <= 5, не ставимо цей самий предмет у цей самий клас сьогодні
-                    const sameSubjectToday = state.schedule.some(s => s.day === dayNum && s.classId == item.classId && s.subject === item.subject);
-                    if (sameSubjectToday && item.hours <= 5) continue;
-
-                    // 5. СПЕЦІАЛЬНА ПЕРЕВІРКА: АЛГЕБРА + ГЕОМЕТРІЯ
-                    const mathSubjects = ['алгебра', 'геометрія', 'алг.', 'геом.'];
+                    
+                    // ==========================================
+                    // БЛОК ПЕРЕВІРОК ТА ОБМЕЖЕНЬ (CONSTRAINTS)
+                    // ==========================================
+                    
+                    // 1. ПЕРЕВІРКА ДОСТУПНОСТІ ВЧИТЕЛЯ (ВКЛАДКА "ВЧИТЕЛІ")
+                    // Якщо клітинка в сітці доступності вчителя позначена як "Зайнятий" (false) — пропускаємо цей слот.
+                    if (teacher?.availability?.[d]?.[s] === false) continue;
+                    
+                    // 2. ПЕРЕВІРКА ЗАЙНЯТОСТІ КЛАСУ
+                    // Перевіряємо, чи немає вже в цього класу іншого уроку в цей же день і цей же час.
+                    if (state.schedule.some(x => x.day === d && x.slot === s && x.classId == item.classId)) continue;
+                    
+                    // 3. ПЕРЕВІРКА ЗАЙНЯТОСТІ ВЧИТЕЛЯ (КОНФЛІКТ РОЗКЛАДУ)
+                    // Перевіряємо, чи не викладає цей вчитель вже в іншому класі в цей же час.
+                    if (state.schedule.some(x => x.day === d && x.slot === s && x.teacherId == item.teacherId)) continue;
+                    
+                    // 4. БАЛАНС: ОДИНАКОВІ ПРЕДМЕТИ В ОДИН ДЕНЬ
+                    // Якщо предметів на тиждень мало (<=5), забороняємо ставити один і той самий предмет двічі на день.
+                    const sameToday = state.schedule.some(x => x.day === d && x.classId == item.classId && x.subject === item.subject);
+                    if (sameToday && item.hours <= 5) continue;
+                    
+                    // 5. СПЕЦІАЛЬНИЙ БАЛАНС: АЛГЕБРА ТА ГЕОМЕТРІЯ
+                    // Якщо це математика і годин небагато, забороняємо ставити алгебру і геометрію в один день одному класу.
+                    const maths = ['алгебра', 'геометрія', 'алг.', 'геом.'];
                     const currentSub = item.subject.toLowerCase();
                     
-                    if (mathSubjects.includes(currentSub)) {
-                        const hasOtherMathToday = state.schedule.some(s => {
-                            const sSub = s.subject.toLowerCase();
-                            return s.day === dayNum && s.classId == item.classId && 
-                                   mathSubjects.includes(sSub) && sSub !== currentSub;
+                    if (maths.includes(currentSub)) {
+                        const hasOtherMathToday = state.schedule.some(x => {
+                            const sSub = x.subject.toLowerCase();
+                            return x.day === d && x.classId == item.classId && 
+                                   maths.includes(sSub) && sSub !== currentSub;
                         });
-                        // Якщо знайшли іншу математику сьогодні — пропускаємо (якщо годин мало)
+                        
                         if (hasOtherMathToday && item.hours <= 5) continue;
                     }
+                    
+                    // Місце для майбутніх умов (наприклад, пункт 6: Перевірка максимальної к-сті уроків на день)
 
-                    // Якщо всі перевірки пройдені — ставимо урок
                     state.schedule.push({
                         id: Date.now() + Math.random(),
-                        teacherId: item.teacherId,
-                        classId: item.classId,
-                        subject: item.subject,
-                        day: dayNum,
-                        slot: slotNum
+                        ...item,
+                        day: d,
+                        slot: s
                     });
                     placed = true;
                     break;
@@ -244,69 +241,8 @@ function generateSchedule() {
         }
     });
 
-    renderAll();
-    save();
-    alert("Розклад успішно збалансовано!");
-}
-
-function generateSchedule() {
-    state.schedule = [];
-    let itemsToPlace = (state.workload || []).map(item => ({ ...item }));
-    
-    // Перемішуємо для рандомності
-    itemsToPlace = itemsToPlace.sort(() => Math.random() - 0.5);
-
-    const days = [0, 1, 2, 3, 4]; // 0=Пн...4=Пт
-    const maxLessonsPerDay = 8;
-
-    itemsToPlace.forEach(item => {
-        let hoursToPlace = item.hours;
-        
-        for (let h = 0; h < hoursToPlace; h++) {
-            let placed = false;
-            const randomDays = [...days].sort(() => Math.random() - 0.5);
-            
-            for (let dayIdx of randomDays) {
-                if (placed) break;
-
-                for (let slotIdx = 0; slotIdx < maxLessonsPerDay; slotIdx++) {
-                    const teacher = state.teachers.find(t => t.id == item.teacherId);
-                    
-                    // Перевірки: зайнятість вчителя, класу, баланс та Алгебра/Геометрія
-                    if (teacher && teacher.availability && teacher.availability[dayIdx] && teacher.availability[dayIdx][slotIdx] === false) continue;
-                    if (state.schedule.some(s => s.day === dayIdx && s.slot === slotIdx && s.classId == item.classId)) continue;
-                    if (state.schedule.some(s => s.day === dayIdx && s.slot === slotIdx && s.teacherId == item.teacherId)) continue;
-
-                    const sameSubToday = state.schedule.some(s => s.day === dayIdx && s.classId == item.classId && s.subject === item.subject);
-                    if (sameSubToday && item.hours <= 5) continue;
-
-                    const mathSubs = ['алгебра', 'геометрія', 'алг.', 'геом.'];
-                    const currentSub = item.subject.toLowerCase();
-                    if (mathSubs.includes(currentSub)) {
-                        const hasOtherMathToday = state.schedule.some(s => {
-                            const sSub = s.subject.toLowerCase();
-                            return s.day === dayIdx && s.classId == item.classId && mathSubs.includes(sSub) && sSub !== currentSub;
-                        });
-                        if (hasOtherMathToday && item.hours <= 5) continue;
-                    }
-
-                    state.schedule.push({
-                        id: Date.now() + Math.random(),
-                        teacherId: item.teacherId,
-                        classId: item.classId,
-                        subject: item.subject,
-                        day: dayIdx,
-                        slot: slotIdx
-                    });
-                    placed = true;
-                    break;
-                }
-            }
-        }
-    });
-
-    // Оновлюємо інтерфейс та зберігаємо дані
-    renderAll();
+    // 4. Оновлення
+    renderAll(); 
     save();
 }
 
@@ -544,6 +480,64 @@ function deleteWorkload(id) {
     // Обов'язково викликаємо перемальовування та збереження
     renderAll();
     save();
+}
+
+function renderSchedule() {
+    const output = document.getElementById('schedule-output');
+    if (!output) return;
+
+    if (!state.schedule || state.schedule.length === 0) {
+        output.innerHTML = `
+            <div class="p-10 text-center bg-white rounded-xl border-2 border-dashed border-gray-200">
+                <p class="text-gray-400 font-medium">Розклад порожній. Натисніть "Запустити генерацію".</p>
+            </div>`;
+        return;
+    }
+
+    const daysNames = ["ПОНЕДІЛОК", "ВІВТОРОК", "СЕРЕДА", "ЧЕТВЕР", "П'ЯТНИЦЯ"];
+    
+    let html = `
+        <div class="overflow-x-auto bg-white rounded-xl shadow-sm border border-gray-200">
+            <table class="w-full border-collapse text-[10px]">
+                <thead>
+                    <tr class="bg-slate-800 text-white">
+                        <th class="border p-2 w-16">День/№</th>
+                        ${state.teachers.map(t => `<th class="border p-2 min-w-[100px] text-center">${t.name}</th>`).join('')}
+                    </tr>
+                </thead>
+                <tbody>
+    `;
+
+    daysNames.forEach((dayName, dayIdx) => {
+        for (let slotIdx = 0; slotIdx < 8; slotIdx++) {
+            html += `<tr class="${slotIdx === 7 ? 'border-b-4 border-slate-100' : ''}">`;
+            
+            if (slotIdx === 0) {
+                html += `<td rowspan="8" class="border p-1 font-bold bg-slate-50 text-center align-middle [writing-mode:vertical-lr] rotate-180 uppercase tracking-tighter text-slate-400 border-r-2">${dayName}</td>`;
+            }
+            
+            html += `<td class="border p-1 text-center bg-gray-50 font-mono text-gray-400">${slotIdx + 1}</td>`;
+
+            state.teachers.forEach(teacher => {
+                const lesson = state.schedule.find(s => s.day === dayIdx && s.slot === slotIdx && s.teacherId == teacher.id);
+                const cls = lesson ? (state.classes.find(c => c.id == lesson.classId)?.name || '?') : '';
+                const isBlocked = !lesson && teacher.availability?.[dayIdx]?.[slotIdx] === false;
+
+                html += `
+                    <td class="border p-1 text-center h-10 ${lesson ? 'bg-blue-50/30' : (isBlocked ? 'bg-gray-100' : '')}">
+                        ${lesson ? `
+                            <div class="font-bold text-slate-800 leading-none">${cls}${getSubjectCode(lesson.subject)}</div>
+                            <div class="text-[8px] text-blue-500 mt-0.5 truncate">${lesson.subject}</div>
+                        ` : (isBlocked ? '<span class="text-gray-300">✕</span>' : '')}
+                    </td>
+                `;
+            });
+            html += `</tr>`;
+        }
+    });
+
+    html += `</tbody></table></div>`;
+    output.innerHTML = html;
 }
 
 // --- ВІЗУАЛІЗАЦІЯ ТА ДРУК ---
