@@ -563,26 +563,31 @@ function deleteWorkload(id) {
 }
 
 function renderSchedule() {
-    const output = document.getElementById('schedule-output');
-    if (!output) return;
+    const container = document.getElementById('schedule-output');
+    if (!container) return;
 
     if (!state.schedule || state.schedule.length === 0) {
-        output.innerHTML = `
-            <div class="p-10 text-center bg-white rounded-xl border-2 border-dashed border-gray-200">
-                <p class="text-gray-400 font-medium">Розклад порожній. Натисніть "Запустити генерацію".</p>
+        container.innerHTML = `
+            <div class="p-10 text-center text-gray-400 bg-white rounded-xl border border-dashed border-gray-300">
+                Розклад ще не згенеровано. Натисніть "Запустити генерацію".
             </div>`;
         return;
     }
 
-    const daysNames = ["ПОНЕДІЛОК", "ВІВТОРОК", "СЕРЕДА", "ЧЕТВЕР", "П'ЯТНИЦЯ"];
+    const daysNames = ["Понеділок", "Вівторок", "Середа", "Четвер", "П'ятниця"];
     
     let html = `
-        <div class="overflow-x-auto bg-white rounded-xl shadow-sm border border-gray-200">
-            <table class="w-full border-collapse text-[10px]">
+        <div class="overflow-x-auto bg-white rounded-xl shadow-md border border-gray-200">
+            <table class="w-full border-collapse min-w-[800px] table-fixed">
                 <thead>
-                    <tr class="bg-slate-800 text-white">
-                        <th class="border p-2 w-16">День/№</th>
-                        ${state.teachers.map(t => `<th class="border p-2 min-w-[100px] text-center">${t.name}</th>`).join('')}
+                    <tr class="bg-slate-100 text-slate-700 text-xs uppercase">
+                        <th class="w-12 border-b border-r p-2">День</th>
+                        <th class="w-10 border-b border-r p-2">№</th>
+                        ${state.teachers.map(t => `
+                            <th class="border-b border-r p-2 text-center truncate" title="${t.name}">
+                                ${t.name.split(' ')[0]}
+                            </th>
+                        `).join('')}
                     </tr>
                 </thead>
                 <tbody>
@@ -590,35 +595,48 @@ function renderSchedule() {
 
     daysNames.forEach((dayName, dayIdx) => {
         for (let slotIdx = 0; slotIdx < 8; slotIdx++) {
-            html += `<tr class="${slotIdx === 7 ? 'border-b-4 border-slate-100' : ''}">`;
-            
-            if (slotIdx === 0) {
-                html += `<td rowspan="8" class="border p-1 font-bold bg-slate-50 text-center align-middle [writing-mode:vertical-lr] rotate-180 uppercase tracking-tighter text-slate-400 border-r-2">${dayName}</td>`;
-            }
-            
-            html += `<td class="border p-1 text-center bg-gray-50 font-mono text-gray-400">${slotIdx + 1}</td>`;
+            const isFirstSlot = slotIdx === 0;
+            html += `<tr class="${slotIdx === 7 ? 'border-b-2 border-b-slate-300' : 'border-b border-gray-100'} hover:bg-blue-50/30 transition">`;
 
+            // 1. Колонка дня (з rowspan)
+            if (isFirstSlot) {
+                html += `
+                    <td rowspan="8" class="bg-slate-50 border-r border-gray-200 text-center font-bold text-slate-500 text-[10px] uppercase tracking-widest [writing-mode:vertical-lr] rotate-180">
+                        ${dayName}
+                    </td>`;
+            }
+
+            // 2. Номер уроку
+            html += `<td class="text-center text-gray-400 font-medium text-xs border-r border-gray-100 p-2">${slotIdx + 1}</td>`;
+
+            // 3. Уроки вчителів
             state.teachers.forEach(teacher => {
                 const lesson = state.schedule.find(s => s.day === dayIdx && s.slot === slotIdx && s.teacherId == teacher.id);
-                const cls = lesson ? (state.classes.find(c => c.id == lesson.classId)?.name || '?') : '';
-                const isBlocked = !lesson && teacher.availability?.[dayIdx]?.[slotIdx] === false;
+                
+                if (lesson) {
+                    const cls = state.classes.find(c => c.id == lesson.classId);
+                    // Використовуємо твою логіку малих літер для предмета
+                    const rawCode = typeof getSubjectCode === 'function' ? getSubjectCode(lesson.subject) : lesson.subject;
+                    const code = rawCode.toLowerCase();
 
-                html += `
-                    <td class="border p-1 text-center h-10 ${lesson ? 'bg-blue-50/30' : (isBlocked ? 'bg-gray-100' : '')}">
-                        ${lesson ? `
-                            <div class="font-bold text-slate-800 leading-none">
-                                ${cls}${getSubjectCode(lesson.subject)}
+                    html += `
+                        <td class="p-1 border-r border-gray-100">
+                            <div class="bg-blue-100 border border-blue-200 rounded p-1 text-center shadow-sm">
+                                <span class="block text-blue-900 font-bold text-[11px] leading-none">${cls?.name || ''}</span>
+                                <span class="text-blue-700 text-[9px] font-medium lowercase">${code}</span>
                             </div>
-                        ` : (isBlocked ? '<span class="text-gray-300">✕</span>' : '')}
-                    </td>
-                `;
+                        </td>`;
+                } else {
+                    html += `<td class="p-1 border-r border-gray-100"></td>`;
+                }
             });
+
             html += `</tr>`;
         }
     });
 
     html += `</tbody></table></div>`;
-    output.innerHTML = html;
+    container.innerHTML = html;
 }
 
 // --- ВІЗУАЛІЗАЦІЯ ТА ДРУК ---
