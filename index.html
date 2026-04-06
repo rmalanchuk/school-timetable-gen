@@ -9,10 +9,19 @@
     <style>
         .tab-content { display: none; }
         .tab-content.active { display: block; }
-        /* Стиль для активної кнопки навігації */
         .nav-btn.active { 
             background-color: rgba(255, 255, 255, 0.1); 
             border-bottom: 3px solid #60a5fa; 
+        }
+        /* Стиль для компактного відображення уроку в таблиці */
+        .lesson-tag {
+            display: block;
+            line-height: 1.1;
+        }
+        .subject-code {
+            font-size: 0.75em;
+            opacity: 0.8;
+            font-weight: normal;
         }
     </style>
 </head>
@@ -45,8 +54,7 @@
                     <button onclick="addTeacher()" class="bg-blue-600 text-white px-6 py-2 rounded-lg font-bold hover:bg-blue-700 shadow-lg shadow-blue-200 transition">Додати</button>
                 </div>
             </div>
-            <div id="list-teachers" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                </div>
+            <div id="list-teachers" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4"></div>
         </section>
 
         <section id="tab-classes" class="tab-content">
@@ -60,63 +68,46 @@
                     <button onclick="addClass()" class="bg-blue-600 text-white px-6 py-2 rounded-lg font-bold hover:bg-blue-700 shadow-lg shadow-blue-200">Створити</button>
                 </div>
             </div>
-            <div id="list-classes" class="flex flex-wrap gap-3">
-                </div>
+            <div id="list-classes" class="flex flex-wrap gap-3"></div>
         </section>
 
         <section id="tab-workload" class="tab-content">
             <h1 class="text-3xl font-extrabold text-slate-800 mb-2">Матриця навантаження</h1>
-            <p class="text-gray-500 mb-6">Вкажіть кількість годин на тиждень для кожного вчителя у відповідних класах</p>
-            <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-                <div class="overflow-x-auto">
-                    <div id="workload-container">
-                        <div class="p-10 text-center text-gray-400">
-                            Додайте хоча б одного вчителя та один клас для формування матриці.
-                        </div>
-                    </div>
+            <p class="text-gray-500 mb-6">Вкажіть предмет та кількість годин для вчителів</p>
+            <div id="workload-container">
+                <div class="p-10 text-center text-gray-400 bg-white rounded-xl border border-dashed border-gray-300">
+                    Додайте хоча б одного вчителя та один клас для формування матриці.
                 </div>
             </div>
         </section>
 
         <section id="tab-schedule" class="tab-content">
-            <div class="flex justify-between items-center mb-6">
+            <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
                 <h1 class="text-3xl font-extrabold text-slate-800">Готовий розклад</h1>
-                <div class="flex gap-2">
-                    <button onclick="generateSchedule()" class="bg-green-600 text-white px-6 py-2 rounded-lg font-bold hover:bg-green-700 shadow-lg shadow-green-200">
+                <div class="flex gap-2 w-full md:w-auto">
+                    <button onclick="generateSchedule()" class="flex-1 bg-green-600 text-white px-6 py-2 rounded-lg font-bold hover:bg-green-700 shadow-lg shadow-green-200 transition">
                         Запустити генерацію
                     </button>
-                    <button onclick="if(typeof printSchedule === 'function') printSchedule(); else alert('Зачекайте, код ще завантажується або містить помилку!')" class="bg-slate-700 text-white px-6 py-2 rounded-lg font-bold hover:bg-slate-800 shadow-lg flex items-center gap-2">
-                        <span>🖨️ На друк</span>
+                    <button onclick="printSchedule()" class="bg-slate-700 text-white px-6 py-2 rounded-lg font-bold hover:bg-slate-800 shadow-lg flex items-center gap-2 transition">
+                        <span>🖨️ Друк</span>
                     </button>
                 </div>
             </div>
-            <div id="schedule-output" class="grid grid-cols-1 gap-8">
-                </div>
+            <div id="schedule-output"></div>
         </section>
 
     </main>
 
-    <footer class="fixed bottom-6 right-6 flex flex-col gap-2">
-        <button onclick="exportData()" title="Зберегти проект у файл" class="bg-slate-800 text-white p-4 rounded-full shadow-2xl hover:scale-110 transition-transform flex items-center justify-center">
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
-            </svg>
-        </button>
-    </footer>
-
     <div id="modal-availability" class="hidden fixed inset-0 bg-black bg-opacity-50 z-[100] flex items-center justify-center p-4">
         <div class="bg-white rounded-xl max-w-2xl w-full p-6 shadow-2xl">
-            <div class="flex justify-between items-center mb-4">
+            <div class="flex justify-between items-center mb-4 border-b pb-2">
                 <h3 id="modal-teacher-name" class="text-xl font-bold">Налаштування доступності</h3>
-                <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600 text-2xl">&times;</button>
+                <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600 text-3xl transition">&times;</button>
             </div>
-            <p class="text-sm text-gray-500 mb-4">Натисніть на клітинку, щоб змінити статус: <span class="text-green-600 font-bold">Зелений</span> — вільний, <span class="text-red-500 font-bold">Червоний</span> — зайнятий.</p>
-            
-            <div id="availability-grid" class="overflow-auto max-h-[60vh]">
-                </div>
-    
+            <p class="text-sm text-gray-500 mb-4">Клацніть на годину, щоб заборонити ставити там уроки.</p>
+            <div id="availability-grid" class="overflow-auto max-h-[60vh] border rounded-lg"></div>
             <div class="mt-6 flex justify-end">
-                <button onclick="closeModal()" class="bg-blue-600 text-white px-6 py-2 rounded-lg font-bold">Готово</button>
+                <button onclick="closeModal()" class="bg-blue-600 text-white px-8 py-2 rounded-lg font-bold hover:bg-blue-700 transition">Готово</button>
             </div>
         </div>
     </div>
