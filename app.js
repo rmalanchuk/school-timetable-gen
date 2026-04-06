@@ -571,13 +571,11 @@ function renderSchedule() {
 
 // --- ВІЗУАЛІЗАЦІЯ ТА ДРУК ---
 function printSchedule() {
-    // 1. Перевіряємо, чи є взагалі що друкувати
     if (!state.schedule || state.schedule.length === 0) {
-        alert("Розклад порожній! Спочатку згенеруйте його.");
+        alert("Розклад порожній!");
         return;
     }
 
-    // 2. Створюємо нове вікно для друку
     const printWindow = window.open('', '_blank');
     const daysNames = ["ПОНЕДІЛОК", "ВІВТОРОК", "СЕРЕДА", "ЧЕТВЕР", "П'ЯТНИЦЯ"];
     const dateStr = new Date().toLocaleDateString('uk-UA');
@@ -587,26 +585,68 @@ function printSchedule() {
         <head>
             <title>Друк розкладу</title>
             <style>
-                body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 20px; }
-                h2 { text-align: center; text-transform: uppercase; font-size: 14px; margin-bottom: 10px; }
-                table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-                th, td { border: 1px solid black; padding: 4px; text-align: center; font-size: 10px; height: 25px; overflow: hidden; }
-                th { background-color: #f2f2f2; }
-                .day-cell { font-weight: bold; writing-mode: vertical-lr; transform: rotate(180deg); width: 30px; background: #fafafa; }
-                .slot-num { width: 30px; color: #666; }
-                @media print {
-                    .no-print { display: none; }
-                    body { padding: 0; }
+                @page {
+                    size: A4 portrait;
+                    margin: 5mm;
                 }
+                body { 
+                    font-family: Arial, sans-serif; 
+                    margin: 0; 
+                    padding: 0; 
+                    -webkit-print-color-adjust: exact; 
+                }
+                h2 { 
+                    text-align: center; 
+                    font-size: 11px; 
+                    margin: 2mm 0; 
+                }
+                table { 
+                    width: 100%; 
+                    border-collapse: collapse; 
+                    table-layout: fixed; 
+                }
+                th, td { 
+                    border: 0.5pt solid black; 
+                    text-align: center; 
+                    font-size: 8px; 
+                    line-height: 1;
+                    height: 16px;
+                    padding: 1px 0;
+                }
+                /* Вертикальні заголовки для вчителів */
+                th.teacher-name {
+                    height: 80px; /* Висота для вертикального тексту */
+                    writing-mode: vertical-lr;
+                    transform: rotate(180deg);
+                    white-space: nowrap;
+                    font-size: 8px;
+                    padding: 2px;
+                    background-color: #f0f0f0;
+                }
+                .day-cell { 
+                    font-weight: bold; 
+                    writing-mode: vertical-lr; 
+                    transform: rotate(180deg); 
+                    width: 15px; 
+                    font-size: 8px;
+                    background: #f9f9f9;
+                }
+                .slot-num { 
+                    width: 15px; 
+                    font-size: 7px;
+                }
+                strong { display: block; font-weight: bold; }
             </style>
         </head>
         <body>
-            <h2>ЗВЕДЕНИЙ РОЗКЛАД (НА ${dateStr})</h2>
+            <h2>ЗВЕДЕНИЙ РОЗКЛАД (${dateStr})</h2>
             <table>
                 <thead>
                     <tr>
-                        <th colspan="2">ДН/№</th>
-                        ${state.teachers.map(t => `<th>${t.name}</th>`).join('')}
+                        <th colspan="2" style="width: 30px; height: 80px;">ДН/№</th>
+                        ${state.teachers.map(t => `
+                            <th class="teacher-name">${t.name}</th>
+                        `).join('')}
                     </tr>
                 </thead>
                 <tbody>
@@ -615,42 +655,32 @@ function printSchedule() {
     daysNames.forEach((dayName, dayIdx) => {
         for (let slotIdx = 0; slotIdx < 8; slotIdx++) {
             html += `<tr>`;
-            
-            // Назва дня (тільки для першого слота дня)
             if (slotIdx === 0) {
                 html += `<td rowspan="8" class="day-cell">${dayName}</td>`;
             }
-            
-            // Номер уроку
             html += `<td class="slot-num">${slotIdx + 1}</td>`;
 
-            // Уроки вчителів
             state.teachers.forEach(teacher => {
                 const lesson = state.schedule.find(s => s.day === dayIdx && s.slot === slotIdx && s.teacherId == teacher.id);
-                
                 if (lesson) {
                     const cls = state.classes.find(c => c.id == lesson.classId)?.name || '';
-                    // Використовуємо ту саму функцію скорочення назв
                     const code = typeof getSubjectCode === 'function' ? getSubjectCode(lesson.subject) : lesson.subject;
                     html += `<td><strong>${cls}${code}</strong></td>`;
                 } else {
                     html += `<td></td>`;
                 }
             });
-            
             html += `</tr>`;
         }
     });
 
-    html += `
-                </tbody>
-            </table>
+    html += `</tbody></table>
             <script>
-                window.onload = function() { window.print(); window.close(); };
+                window.onload = function() { 
+                    setTimeout(() => { window.print(); window.close(); }, 300); 
+                };
             </script>
-        </body>
-        </html>
-    `;
+        </body></html>`;
 
     printWindow.document.write(html);
     printWindow.document.close();
