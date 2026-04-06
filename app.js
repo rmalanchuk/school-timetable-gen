@@ -649,74 +649,70 @@ function printSchedule() {
         <head>
             <style>
                 @page { size: A4 portrait; margin: 10mm; }
-                body { font-family: 'Segoe UI', Arial, sans-serif; margin: 0; padding: 0; background: #fff; }
+                body { font-family: 'Segoe UI', Arial, sans-serif; margin: 0; padding: 0; }
                 
-                /* ТАБЛИЦЯ ЯК МОНОЛІТ */
-                .print-wrapper {
-                    background-color: #000; /* Це і є наші лінії */
+                /* Використовуємо border-spacing для створення ідеально рівних ліній через фон */
+                .table-container {
+                    background-color: #000;
+                    padding: 1.5pt; /* Зовнішня рамка */
                     display: inline-block;
                     width: 100%;
-                    padding: 2pt; /* Зовнішня жирна рамка */
+                    box-sizing: border-box;
                 }
 
                 table { 
                     width: 100%; 
                     border-collapse: separate; 
-                    border-spacing: 0.5pt; /* Товщина звичайних ліній */
+                    border-spacing: 0.5pt; /* Товщина внутрішніх ліній */
                     background-color: #000;
                     table-layout: fixed;
                 }
                 
                 th, td { 
-                    background-color: #fff; /* Колір клітинки */
+                    background-color: #fff; 
                     text-align: center; 
-                    padding: 1pt; 
-                    height: 22px; 
-                    vertical-align: middle;
+                    padding: 2px; 
+                    height: 24px; 
+                    vertical-align: middle; 
                     -webkit-print-color-adjust: exact;
                 }
 
-                /* ЖИРНІ РОЗДІЛЬНИКИ (Імітація через висоту) */
-                thead th { 
-                    border-bottom: 2pt solid #000; 
-                }
+                /* Робимо жирні лінії через збільшений border-bottom саме для розділення */
+                thead th { border-bottom: 2pt solid #000; }
+                .day-sep td { border-top: 2pt solid #000; }
 
-                .day-boundary td { 
-                    border-top: 2pt solid #000; 
-                }
-
-                .corner-cell { font-size: 7px; font-weight: bold; width: 20px; }
-                .col-num { width: 18px; font-size: 9px; font-weight: bold; }
+                .corner-cell { font-size: 7px; font-weight: bold; width: 22px; }
+                .col-num { width: 20px; font-size: 9px; font-weight: bold; }
                 
                 .day-cell { 
                     font-weight: bold; 
                     writing-mode: vertical-lr; 
                     transform: rotate(180deg); 
-                    font-size: 9px; 
-                    width: 20px;
+                    font-size: 10px; 
+                    width: 22px; 
+                    background-color: #f1f5f9 !important; 
                 }
 
                 th.teacher-name { 
-                    height: 110px; 
+                    height: 115px; 
                     writing-mode: vertical-lr; 
                     transform: rotate(180deg); 
                     white-space: nowrap; 
                     font-size: 10px; 
                     font-weight: bold; 
                     text-align: left; 
-                    padding: 5px 2px;
+                    padding: 4px;
                 }
                 
                 .lesson-box { line-height: 1.1; }
                 .class-name { font-size: 10px; font-weight: 800; display: block; }
-                .sub-code { font-size: 7px; text-transform: lowercase; display: block; }
-                
-                .slot-0 { background-color: #fffdf5 !important; }
+                .sub-code { font-size: 7px; display: block; text-transform: lowercase; }
+                .slot-0 { background-color: #fffdf0 !important; }
             </style>
         </head>
         <body>
             <h2 style="text-align:center; font-size:12px; margin: 0 0 4mm 0;">ЗВЕДЕНИЙ РОЗКЛАД (${dateStr})</h2>
-            <div class="print-wrapper">
+            <div class="table-container">
                 <table>
                     <thead>
                         <tr>
@@ -733,13 +729,12 @@ function printSchedule() {
         const totalRowsForDay = 9 - startSlot;
 
         for (let slotIdx = startSlot; slotIdx <= 8; slotIdx++) {
-            const isFirstRowOfDay = (slotIdx === startSlot);
-            const needsSeparator = (isFirstRowOfDay && dayIdx > 0);
-            const rowClass = needsSeparator ? 'class="day-boundary"' : '';
-
-            html += `<tr ${rowClass}>`;
+            const isFirstRow = (slotIdx === startSlot);
+            const isBoundary = (isFirstRow && dayIdx > 0);
             
-            if (isFirstRowOfDay) {
+            html += `<tr class="${isBoundary ? 'day-sep' : ''}">`;
+            
+            if (isFirstRow) {
                 html += `<td rowspan="${totalRowsForDay}" class="day-cell">${dayName}</td>`;
             }
             
@@ -747,19 +742,19 @@ function printSchedule() {
 
             state.teachers.forEach(teacher => {
                 const lesson = state.schedule.find(s => s.day === dayIdx && s.slot === slotIdx && s.teacherId == teacher.id);
-                const isSlot0 = slotIdx === 0 ? 'slot-0' : '';
+                const s0 = slotIdx === 0 ? 'slot-0' : '';
                 
                 if (lesson) {
                     const clsName = state.classes.find(c => c.id == lesson.classId)?.name || '';
                     const rawCode = typeof getSubjectCode === 'function' ? getSubjectCode(lesson.subject) : lesson.subject;
-                    html += `<td class="${isSlot0}">
+                    html += `<td class="${s0}">
                         <div class="lesson-box">
                             <span class="class-name">${clsName}</span>
                             <span class="sub-code">${rawCode}</span>
                         </div>
                     </td>`;
                 } else {
-                    html += `<td class="${isSlot0}"></td>`;
+                    html += `<td class="${s0}"></td>`;
                 }
             });
             html += `</tr>`;
@@ -769,10 +764,7 @@ function printSchedule() {
     html += `</tbody></table></div>
     <script>
         window.onload = function() { 
-            setTimeout(() => { 
-                window.print(); 
-                window.close(); 
-            }, 500); 
+            setTimeout(() => { window.print(); window.close(); }, 400); 
         };
     </script>
     </body></html>`;
