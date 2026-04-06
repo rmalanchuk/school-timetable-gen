@@ -650,30 +650,66 @@ function printSchedule() {
             <style>
                 @page { size: A4 portrait; margin: 5mm; }
                 body { font-family: 'Segoe UI', Arial, sans-serif; margin: 0; padding: 0; }
-                table { width: 100%; border-collapse: collapse; table-layout: fixed; border: 1pt solid #000; }
-                th, td { border: 0.5pt solid #000; text-align: center; padding: 0; box-sizing: border-box; height: 20px; vertical-align: middle; position: relative; }
                 
-                /* Жирна лінія під заголовками вчителів */
-                thead th { border-bottom: 2.5pt solid #000 !important; }
+                /* Використовуємо border-spacing замість collapse для чітких жирних ліній */
+                table { 
+                    width: 100%; 
+                    border-collapse: separate; 
+                    border-spacing: 0; 
+                    table-layout: fixed; 
+                    border: 1pt solid #000; 
+                }
                 
+                th, td { 
+                    border-right: 0.5pt solid #000; 
+                    border-bottom: 0.5pt solid #000; 
+                    text-align: center; 
+                    padding: 0; 
+                    box-sizing: border-box; 
+                    height: 20px; 
+                    vertical-align: middle; 
+                }
+                
+                th:last-child, td:last-child { border-right: none; }
+
+                /* ЖИРНА ЛІНІЯ ПІД ХЕДЕРОМ */
+                thead th { 
+                    border-bottom: 2.5pt solid #000 !important; 
+                }
+                
+                /* ЖИРНА ЛІНІЯ МІЖ ДНЯМИ */
+                .day-boundary td { 
+                    border-top: 2pt solid #000 !important; 
+                }
+
                 .corner-cell { font-size: 7px !important; font-weight: bold; width: 18px; }
                 .col-num { width: 16px; font-size: 8px !important; color: #333; }
-                .day-cell { font-weight: bold; writing-mode: vertical-lr; transform: rotate(180deg); font-size: 9px; width: 18px; background-color: #f1f5f9 !important; }
-                th.teacher-name { height: 110px; writing-mode: vertical-lr; transform: rotate(180deg); white-space: nowrap; font-size: 10px; font-weight: bold; text-align: left; padding: 5px 2px; background-color: #f8fafc !important; }
+                .day-cell { 
+                    font-weight: bold; 
+                    writing-mode: vertical-lr; 
+                    transform: rotate(180deg); 
+                    font-size: 9px; 
+                    width: 18px; 
+                    background-color: #f1f5f9 !important; 
+                    border-bottom: none !important; /* Щоб не було зайвих ліній всередині дня */
+                }
+                
+                th.teacher-name { 
+                    height: 110px; 
+                    writing-mode: vertical-lr; 
+                    transform: rotate(180deg); 
+                    white-space: nowrap; 
+                    font-size: 10px; 
+                    font-weight: bold; 
+                    text-align: left; 
+                    padding: 5px 2px; 
+                    background-color: #f8fafc !important; 
+                }
                 
                 .lesson-box { display: block; width: 100%; line-height: 1; }
                 .class-name { font-size: 9px !important; font-weight: 800; display: block; margin-top: 1px; }
                 .sub-code { font-size: 6.5px !important; font-weight: 400; text-transform: lowercase; display: block; margin-bottom: 1px; }
                 .slot-0 { background-color: #fffaf0 !important; }
-                
-                /* Фікс для жирної лінії: малюємо її через box-shadow, щоб вона ігнорувала конфлікти border-collapse */
-                .day-boundary-row td {
-                    box-shadow: inset 0 2.5pt 0 0 #000;
-                }
-                /* Окремий фікс для клітинки дня, яка має rowspan */
-                .day-boundary-cell {
-                    box-shadow: inset 0 2.5pt 0 0 #000, inset 0.5pt 0 0 0 #000;
-                }
             </style>
         </head>
         <body>
@@ -694,15 +730,15 @@ function printSchedule() {
         const totalRowsForDay = 9 - startSlot;
 
         for (let slotIdx = startSlot; slotIdx <= 8; slotIdx++) {
-            const isBoundary = (slotIdx === startSlot && dayIdx > 0);
-            const rowClass = isBoundary ? 'class="day-boundary-row"' : '';
+            // Додаємо клас жирної лінії для початку Вівторка, Середи і т.д.
+            const isFirstRowOfDay = (slotIdx === startSlot);
+            const isBoundary = (isFirstRowOfDay && dayIdx > 0);
+            const rowClass = isBoundary ? 'class="day-boundary"' : '';
 
             html += `<tr ${rowClass}>`;
             
-            if (slotIdx === startSlot) {
-                // Застосовуємо спеціальний клас до клітинки з назвою дня
-                const dayCellClass = isBoundary ? 'day-cell day-boundary-cell' : 'day-cell';
-                html += `<td rowspan="${totalRowsForDay}" class="${dayCellClass}">${dayName}</td>`;
+            if (isFirstRowOfDay) {
+                html += `<td rowspan="${totalRowsForDay}" class="day-cell">${dayName}</td>`;
             }
             
             html += `<td class="col-num ${slotIdx === 0 ? 'slot-0' : ''}">${slotIdx}</td>`;
