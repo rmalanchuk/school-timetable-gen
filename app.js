@@ -357,56 +357,78 @@ function renderWorkload() {
     const container = document.getElementById('workload-container');
     if (!container) return;
 
-    // Перевіряємо, чи є вчителі та класи
-    if (state.teachers.length === 0 || state.classes.length === 0) {
+    if (!state.teachers || state.teachers.length === 0 || !state.classes || state.classes.length === 0) {
         container.innerHTML = `
-            <div class="p-10 text-center bg-slate-50 rounded-xl border-2 border-dashed border-slate-200">
-                <p class="text-slate-400">Спочатку додайте вчителів та класи у відповідних вкладках.</p>
+            <div class="p-10 text-center bg-white rounded-xl border-2 border-dashed border-gray-200">
+                <p class="text-gray-400">Спочатку додайте вчителів та класи у відповідних вкладках.</p>
             </div>`;
         return;
     }
 
-    let html = '<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">';
+    // Сортуємо вчителів за ПІБ
+    const sortedTeachers = [...state.teachers].sort((a, b) => a.name.localeCompare(b.name));
 
-    state.teachers.forEach(teacher => {
-        // Рахуємо загальну кількість годин для бейджа
-        const totalHours = (teacher.workload || []).reduce((sum, w) => sum + Number(w.hours), 0);
+    let html = `<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">`;
+
+    sortedTeachers.forEach(teacher => {
+        const teacherWorkload = state.workload.filter(w => w.teacherId === teacher.id);
+        
+        // Сортування: спочатку за номером класу, потім за назвою предмета
+        teacherWorkload.sort((a, b) => {
+            const classA = state.classes.find(c => c.id === a.classId)?.name || "";
+            const classB = state.classes.find(c => c.id === b.classId)?.name || "";
+            
+            // Порівняння класів (напр. "7-А" vs "10-Б")
+            const classComparison = classA.localeCompare(classB, undefined, {numeric: true});
+            if (classComparison !== 0) return classComparison;
+            
+            // Якщо класи однакові, сортуємо за предметом
+            return a.subject.localeCompare(b.subject);
+        });
+
+        const totalHours = teacherWorkload.reduce((sum, w) => sum + w.hours, 0);
 
         html += `
-            <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
-                <div class="p-4 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
-                    <h3 class="font-bold text-slate-800 truncate mr-2">${teacher.name}</h3>
-                    <span class="bg-blue-600 text-white text-[10px] px-2 py-0.5 rounded-full whitespace-nowrap">
-                        ${totalHours} год
-                    </span>
+            <div class="bg-white rounded-2xl shadow-sm border border-gray-100 flex flex-col overflow-hidden">
+                <div class="p-4 bg-slate-50 border-b border-gray-100 flex justify-between items-center">
+                    <h3 class="font-bold text-slate-800 truncate pr-2" title="${teacher.name}">${teacher.name}</h3>
+                    <span class="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-1 rounded-full whitespace-nowrap">${totalHours} год</span>
                 </div>
                 
-                <div class="p-4 flex-grow space-y-2 min-h-[50px]">
-                    ${renderWorkloadItems(teacher)}
+                <div class="p-4 space-y-2 overflow-y-auto" style="max-height: 280px; min-height: 100px;">
+                    ${teacherWorkload.length > 0 ? teacherWorkload.map(w => {
+                        const cls = state.classes.find(c => c.id === w.classId);
+                        return `
+                            <div class="flex items-center justify-between p-3 bg-gray-50 rounded-xl border border-gray-100 hover:border-blue-200 transition-colors group">
+                                <div class="flex-1 min-w-0">
+                                    <div class="flex items-center gap-2">
+                                        <span class="text-blue-600 font-bold text-sm">${cls ? cls.name : '?'}</span>
+                                        <span class="text-xs text-gray-400 font-medium truncate">${w.subject}</span>
+                                    </div>
+                                </div>
+                                <div class="flex items-center gap-3 ml-2">
+                                    <span class="font-black text-slate-700 text-sm">${w.hours}г</span>
+                                    <button onclick="deleteWorkload(${w.id})" class="text-gray-300 hover:text-red-500 transition-colors">
+                                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                                        </svg>
+                                    </button>
+                                </div>
+                            </div>
+                        `;
+                    }).join('') : `<p class="text-center text-gray-300 text-sm py-4 italic">Навантаження не задано</p>`}
                 </div>
 
-                <div class="p-4 bg-slate-50 border-t border-slate-200">
-                    <div class="grid grid-cols-1 gap-2">
-                        <select id="sel-cls-${teacher.id}" class="w-full text-xs p-2 rounded border border-slate-300">
-                            ${state.classes.map(c => `<option value="${c.id}">${c.name}</option>`).join('')}
-                        </select>
-                        <div class="flex gap-2">
-                            <input type="text" id="inp-sub-${teacher.id}" placeholder="Предмет" 
-                                class="flex-grow text-xs p-2 rounded border border-slate-300 outline-none focus:border-blue-500">
-                            <input type="number" id="inp-hrs-${teacher.id}" placeholder="Год" 
-                                class="w-14 text-xs p-2 rounded border border-slate-300">
-                            <button onclick="addWorkload('${teacher.id}')" 
-                                class="bg-blue-600 text-white px-3 rounded-lg hover:bg-blue-700 transition font-bold">
-                                +
-                            </button>
-                        </div>
-                    </div>
+                <div class="p-4 mt-auto bg-gray-50/50 border-t border-gray-100">
+                    <button onclick="openAddWorkloadModal(${teacher.id})" class="w-full py-2 bg-white border-2 border-dashed border-gray-300 text-gray-500 rounded-xl text-sm font-bold hover:border-blue-400 hover:text-blue-500 transition-all flex items-center justify-center gap-2">
+                        <span>+ Додати години</span>
+                    </button>
                 </div>
             </div>
         `;
     });
 
-    html += '</div>';
+    html += `</div>`;
     container.innerHTML = html;
 }
 
