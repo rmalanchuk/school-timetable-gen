@@ -655,8 +655,9 @@ function printSchedule() {
                     width: 100%; 
                     border-collapse: collapse; 
                     table-layout: fixed; 
-                    /* Головна зовнішня рамка */
-                    border: 2.5pt solid #000;
+                    /* Зовнішня жирна рамка */
+                    outline: 2.5pt solid #000;
+                    border: none;
                 }
                 
                 th, td { 
@@ -665,24 +666,31 @@ function printSchedule() {
                     padding: 0; 
                     box-sizing: border-box; 
                     height: 20px; 
-                    vertical-align: middle; 
+                    vertical-align: middle;
+                    position: relative;
                 }
 
-                /* ЖИРНА ЛІНІЯ ПІД ХЕДЕРОМ */
+                /* ЖИРНИЙ НИЗ ХЕДЕРА */
                 thead th { 
                     border-bottom: 2.5pt solid #000 !important;
                 }
                 
-                /* Усуваємо тонкі лінії зліва у перших колонок, щоб вони не перекривали жирну рамку таблиці */
+                /* ПРИБИРАЄМО ЗАЙВІ ЛІНІЇ ПО КРАЯХ, ЩОБ НЕ ПЕРЕКРИВАЛИ РАМКУ ТАБЛИЦІ */
                 th:first-child, td:first-child { border-left: none; }
-                /* Те саме справа */
                 th:last-child, td:last-child { border-right: none; }
-                /* Те саме знизу */
                 tr:last-child td { border-bottom: none; }
 
-                /* ЖИРНІ РОЗДІЛЬНИКИ МІЖ ДНЯМИ (нижня межа останнього рядка дня) */
-                .day-end-row td { 
-                    border-bottom: 2.5pt solid #000 !important; 
+                /* ЖИРНІ ЛІНІЇ МІЖ ДНЯМИ */
+                /* Використовуємо псевдоелемент, щоб лінія була ПОВЕРХ клітинок і ідеально рівна */
+                .day-divider td::after {
+                    content: "";
+                    position: absolute;
+                    bottom: -1.25pt; /* Центруємо відносно стандартної межі */
+                    left: 0;
+                    right: 0;
+                    height: 2.5pt;
+                    background: #000;
+                    z-index: 10;
                 }
 
                 .corner-cell { font-size: 7px !important; font-weight: bold; width: 18px; }
@@ -733,10 +741,10 @@ function printSchedule() {
         const totalRowsForDay = 9 - startSlot;
 
         for (let slotIdx = startSlot; slotIdx <= 8; slotIdx++) {
-            // Клас для останнього рядка кожного дня (крім останнього дня тижня, де межа — це рамка таблиці)
+            // Клас для останнього рядка дня
             const isLastRowOfDay = (slotIdx === 8);
             const needsSeparator = (isLastRowOfDay && dayIdx < 4);
-            const rowClass = needsSeparator ? 'class="day-end-row"' : '';
+            const rowClass = needsSeparator ? 'class="day-divider"' : '';
 
             html += `<tr ${rowClass}>`;
             
