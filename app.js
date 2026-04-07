@@ -220,23 +220,33 @@ function closeModal() {
 function renderAvailabilityGrid(teacher) {
     const container = document.getElementById('availability-grid');
     const days = state.config.days;
-    const lessons = state.config.maxLessons;
+    const lessons = state.config.maxLessons; // Це 8 або 9
 
     let html = `<table class="w-full border-collapse text-sm">
         <thead><tr><th class="p-1"></th>`;
     days.forEach(d => html += `<th class="border p-2 bg-gray-100 font-bold">${d}</th>`);
     html += `</tr></thead><tbody>`;
 
-    for (let l = 0; l < lessons; l++) {
-        html += `<tr><td class="border p-2 font-bold bg-gray-50 text-center">${l + 1}</td>`;
+    for (let l = 0; l <= 7; l++) { // Обмежуємо 7-ма уроками для вибору
+        html += `<tr><td class="border p-2 font-bold bg-gray-50 text-center">${l}</td>`;
         for (let d = 0; d < 5; d++) {
-            const isAvailable = teacher.availability[d][l];
-            const colorClass = isAvailable ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700';
-            const statusText = isAvailable ? 'Вільний' : 'Зайнятий';
+            // Дістаємо статус: 0-зелене, 1-жовте, 2-червоне
+            const status = (teacher.availability && teacher.availability[d]) ? teacher.availability[d][l] : 0;
+            
+            let colorClass = 'bg-green-100 text-green-700';
+            let statusText = 'Вільний';
+            
+            if (status === 1) {
+                colorClass = 'bg-yellow-100 text-yellow-700';
+                statusText = 'Бажано вікно';
+            } else if (status === 2) {
+                colorClass = 'bg-red-100 text-red-700';
+                statusText = 'НЕ МОЖНА';
+            }
             
             html += `
                 <td onclick="toggleAvailability(${d}, ${l})" 
-                    class="border p-2 cursor-pointer text-center font-medium transition ${colorClass} hover:brightness-95 select-none">
+                    class="border p-2 cursor-pointer text-[10px] text-center font-medium transition ${colorClass} hover:brightness-95 select-none">
                     ${statusText}
                 </td>`;
         }
@@ -249,7 +259,12 @@ function renderAvailabilityGrid(teacher) {
 function toggleAvailability(dayIndex, lessonIndex) {
     const teacher = state.teachers.find(t => t.id === currentEditingTeacherId);
     if (teacher) {
-        teacher.availability[dayIndex][lessonIndex] = !teacher.availability[dayIndex][lessonIndex];
+        if (!teacher.availability[dayIndex]) teacher.availability[dayIndex] = [];
+        
+        // Цикл: 0 -> 1 -> 2 -> 0
+        let currentStatus = teacher.availability[dayIndex][lessonIndex] || 0;
+        teacher.availability[dayIndex][lessonIndex] = (currentStatus + 1) % 3;
+        
         renderAvailabilityGrid(teacher);
     }
 }
@@ -383,6 +398,21 @@ function runSingleGeneration() {
                     if (!isAdjacent) continue;
                 }
 
+                // 1. ПЕРЕВІРКА ЧЕРВОНОЇ ЗОНИ (АБСОЛЮТНЕ ТАБУ)
+                const hasRedZone = task.items.some(it => {
+                    const status = getTeacherStatus(it.teacherId, d, s);
+                    return status === 2; // Якщо хоч один вчитель у парі/чергуванні має червоне - слот бан
+                });
+                if (hasRedZone) continue; // Цей рядок робить червоні зони недоторканними
+            
+                // 2. Конфлікт класу та вчителя (залишаємо як було)
+                if (tempSchedule.some(ls => ls.day === d && ls.slot === s && ls.classId === firstItem.classId)) continue;
+                
+                const isTeacherBusy = task.items.some(it => 
+                    tempSchedule.some(ls => ls.day === d && ls.slot === s && ls.teacherId === it.teacherId)
+                );
+                if (isTeacherBusy) continue;
+
                 // РОЗРАХУНОК ШТРАФУ
                 let penalty = 0;
                 
@@ -425,26 +455,27 @@ function runSingleGeneration() {
 
 // 3. Універсальний калькулятор штрафів
 function calculatePenalty(item, d, s, tempSchedule, priority) {
-    const teacher = state.teachers.find(t => t.id === item.teacherId);
-    if (!teacher) return 0;
-    
-    // 0 - ок, 1 - небажано (жовтий), 2 - бан (червоний)
-    const status = (teacher.availability && teacher.availability[d] && teacher.availability[d][s]) || 0;
+    const status = getTeacherStatus(item.teacherId, d, s);
 
-    if (status === 2) return 1000000; // КАТЕГОРИЧНО НЕ МОЖНА
+    if (status === 2) return 1000000; // Для надійності повертаємо космос
 
     let p = 0;
-    if (status === 1) p += (priority === 1) ? 400 : 2000; // Жовтий легше пробити важливому предмету
+    // Жовта зона (1) - додаємо відчутний штраф
+    if (status === 1) p += 5000; 
 
-    const tLessonsToday = tempSchedule.filter(ls => ls.day === d && ls.teacherId === teacher.id).length;
-    if (tLessonsToday >= 6) p += (priority === 1) ? 20 : 150;
-
-    const hasNeighbor = tempSchedule.some(ls => ls.day === d && ls.teacherId === teacher.id && Math.abs(ls.slot - s) === 1);
-    if (!hasNeighbor && tLessonsToday > 0) p += (priority === 1) ? 10 : 100;
+    // Штраф за вікна та навантаження
+    const tLessonsToday = tempSchedule.filter(ls => ls.day === d && ls.teacherId === item.teacherId).length;
+    if (tLessonsToday >= 6) p += 500;
 
     return p;
 }
 
+// Додай цю допоміжну функцію, якщо її немає
+function getTeacherStatus(teacherId, day, slot) {
+    const teacher = state.teachers.find(t => t.id === teacherId);
+    if (!teacher || !teacher.availability || !teacher.availability[day]) return 0;
+    return teacher.availability[day][slot] || 0;
+}
 // Оновлений звіт
 function showGenerationReport(errors, attempts, time) {
     const output = document.getElementById('schedule-output');
