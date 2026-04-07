@@ -312,11 +312,9 @@ function generateSchedule() {
 
 // 2. Логіка однієї конкретної спроби
 function runSingleGeneration() {
-    // 0. Беремо ТІЛЬКИ 0-й урок (якщо він є). 
     let tempSchedule = state.schedule.filter(s => s.slot === 0);
     let unplaced = [];
     
-    // 1. ПІДГОТОВКА НАВАНТАЖЕННЯ
     const flatWorkload = [];
     state.workload.forEach(item => {
         let h = parseFloat(item.hours);
@@ -330,31 +328,13 @@ function runSingleGeneration() {
     const tasks = [];
     const classesIds = [...new Set(state.classes.map(c => c.id))];
     
-    // 2. ГРУПУВАННЯ ЧЕРГУВАНЬ
     classesIds.forEach(cId => {
-        let classAltSuffixes = flatWorkload.filter(w => w.classId === cId && w.currentHours === 0.5 && w.splitType === 'alternating' && !w.used);
-        const teacherIds = [...new Set(classAltSuffixes.map(s => s.teacherId))];
-        
-        teacherIds.forEach(tId => {
-            let tSuffixes = classAltSuffixes.filter(s => s.teacherId === tId && !s.used);
-            while (tSuffixes.length >= 2) {
-                const i1 = tSuffixes.shift(); const i2 = tSuffixes.shift();
-                i1.used = true; i2.used = true;
-                tasks.push({ type: 'paired', items: [i1, i2], priority: Math.min(getPriority(i1.subject), getPriority(i2.subject)) });
-            }
-        });
-
-        classAltSuffixes = classAltSuffixes.filter(s => !s.used);
-        while (classAltSuffixes.length >= 2) {
-            const i1 = classAltSuffixes.shift(); const i2 = classAltSuffixes.shift();
+        let classAlt = flatWorkload.filter(w => w.classId === cId && w.currentHours === 0.5 && w.splitType === 'alternating' && !w.used);
+        while (classAlt.length >= 2) {
+            const i1 = classAlt.shift(); const i2 = classAlt.shift();
             i1.used = true; i2.used = true;
             tasks.push({ type: 'paired', items: [i1, i2], priority: Math.min(getPriority(i1.subject), getPriority(i2.subject)) });
         }
-
-        classAltSuffixes.filter(s => !s.used).forEach(item => {
-            item.used = true; 
-            unplaced.push(`⚠️ Немає пари для чергування: ${item.subject} (${state.classes.find(c => c.id === cId)?.name})`);
-        });
     });
 
     flatWorkload.filter(w => !w.used).forEach(item => {
@@ -362,60 +342,57 @@ function runSingleGeneration() {
         tasks.push({ type: 'single', items: [item], priority: getPriority(item.subject) });
     });
 
-    // --- СОРТУВАННЯ ЗА ПРІОРИТЕТОМ (Важливо!) ---
+    // СОРТУВАННЯ: Важливі наперед
     tasks.sort((a, b) => {
         if (a.priority !== b.priority) return a.priority - b.priority;
         return Math.random() - 0.5;
     });
 
-    // 3. ЦИКЛ РОЗСТАНОВКИ
     tasks.forEach(task => {
         const firstItem = task.items[0];
         const priority = task.priority;
         let bestSlot = null;
         let minPen = Infinity;
 
-        // Рандомний старт дня для рівномірності
-        const dayOffset = Math.floor(Math.random() * 5);
+        // Перемішуємо дні
+        const days = [0, 1, 2, 3, 4].sort(() => Math.random() - 0.5);
 
-        for (let d_raw = 0; d_raw < 5; d_raw++) {
-            let d = (d_raw + dayOffset) % 5;
-            
+        for (let d of days) {
             for (let s = 1; s <= 7; s++) {
-                // АБСОЛЮТНІ ЗАБОРОНИ
-                if (tempSchedule.some(ls => ls.day === d && ls.slot === s && ls.classId === firstItem.classId)) continue;
+                // 1. ПЕРЕВІРКА КЛАСУ (Залізна заборона)
+                const isClassOccupied = tempSchedule.some(ls => ls.day === d && ls.slot === s && ls.classId === firstItem.classId);
+                if (isClassOccupied) continue;
 
-                const isTeacherBusy = task.items.some(it => 
+                // 2. ПЕРЕВІРКА ВЧИТЕЛЯ (Залізна заборона)
+                const isTBusy = task.items.some(it => 
                     tempSchedule.some(ls => ls.day === d && ls.slot === s && ls.teacherId === it.teacherId)
                 );
-                if (isTeacherBusy) continue;
+                if (isTBusy) continue;
 
-                const hasRedZone = task.items.some(it => getTeacherStatus(it.teacherId, d, s) === 2);
-                if (hasRedZone) continue;
+                // 3. ЧЕРВОНА ЗОНА (Залізна заборона)
+                const isRed = task.items.some(it => getTeacherStatus(it.teacherId, d, s) === 2);
+                if (isRed) continue;
 
-                // ЛОГІКА ПОВТОРІВ ПРЕДМЕТА
+                let currentPenalty = 0;
+
+                // 4. ДУБЛЮВАННЯ ТА ПАРИ
                 const countToday = tempSchedule.filter(ls => ls.day === d && ls.classId === firstItem.classId && ls.subject === firstItem.subject).length;
                 
-                let currentSlotPenalty = 0;
-
                 if (countToday > 0) {
-                    if (priority === 1) continue; // Заборона 2-ї математики
+                    if (priority === 1) continue; // Математику не дублюємо ніколи
                     
-                    const isAdjacent = tempSchedule.some(ls => 
+                    const isAdj = tempSchedule.some(ls => 
                         ls.day === d && ls.classId === firstItem.classId && 
                         ls.subject === firstItem.subject && Math.abs(ls.slot - s) === 1
                     );
-                    
-                    if (!isAdjacent) {
-                        currentSlotPenalty += 25000; // Величезний штраф за розрив пари, але не смерть
-                    }
+                    if (!isAdj) currentPenalty += 20000; // Штраф за розрив пари
                 }
 
-                // Додаємо загальні штрафи (твою оновлену calculatePenalty)
-                currentSlotPenalty += calculatePenalty(firstItem, d, s, tempSchedule, priority);
+                // 5. ДОДАТКОВІ ШТРАФИ
+                currentPenalty += calculatePenalty(firstItem, d, s, tempSchedule, priority);
 
-                if (currentSlotPenalty < minPen) {
-                    minPen = currentSlotPenalty;
+                if (currentPenalty < minPen) {
+                    minPen = currentPenalty;
                     bestSlot = { d, s };
                 }
             }
@@ -430,8 +407,11 @@ function runSingleGeneration() {
                 });
             });
         } else {
-            const tName = state.teachers.find(t => t.id === firstItem.teacherId)?.name || '???';
-            unplaced.push(`${firstItem.subject} (${tName}) - ${state.classes.find(c => c.id === firstItem.classId)?.name}`);
+            const tObj = state.teachers.find(t => t.id === firstItem.teacherId);
+            const tName = tObj ? tObj.name : "Невідомий вчитель";
+            const cObj = state.classes.find(c => c.id === firstItem.classId);
+            const cName = cObj ? cObj.name : "???";
+            unplaced.push(`${firstItem.subject} (${tName}) - ${cName} клас`);
         }
     });
 
