@@ -309,12 +309,8 @@ function runSingleGeneration() {
     
     classesIds.forEach(cId => {
         const cls = state.classes.find(c => c.id === cId);
-        // Вибираємо тільки 0.5, де стоїть тип "alternating"
         let classAltSuffixes = flatWorkload.filter(w => 
-            w.classId === cId && 
-            w.currentHours === 0.5 && 
-            w.splitType === 'alternating' && 
-            !w.used
+            w.classId === cId && w.currentHours === 0.5 && w.splitType === 'alternating' && !w.used
         );
         
         // --- ЕТАП А: Внутрішнє чергування ---
@@ -322,124 +318,102 @@ function runSingleGeneration() {
         teacherIds.forEach(tId => {
             let tSuffixes = classAltSuffixes.filter(s => s.teacherId === tId && !s.used);
             while (tSuffixes.length >= 2) {
-                const i1 = tSuffixes.shift();
-                const i2 = tSuffixes.shift();
+                const i1 = tSuffixes.shift(); const i2 = tSuffixes.shift();
                 i1.used = true; i2.used = true;
-                tasks.push({
-                    type: 'paired',
-                    items: [i1, i2],
-                    priority: Math.min(getPriority(i1.subject), getPriority(i2.subject))
-                });
+                tasks.push({ type: 'paired', items: [i1, i2], priority: Math.min(getPriority(i1.subject), getPriority(i2.subject)) });
             }
         });
 
         // --- ЕТАП Б: Зовнішнє чергування ---
         classAltSuffixes = classAltSuffixes.filter(s => !s.used);
         while (classAltSuffixes.length >= 2) {
-            const i1 = classAltSuffixes.shift();
-            const i2 = classAltSuffixes.shift();
+            const i1 = classAltSuffixes.shift(); const i2 = classAltSuffixes.shift();
             i1.used = true; i2.used = true;
-            tasks.push({
-                type: 'paired',
-                items: [i1, i2],
-                priority: Math.min(getPriority(i1.subject), getPriority(i2.subject))
-            });
+            tasks.push({ type: 'paired', items: [i1, i2], priority: Math.min(getPriority(i1.subject), getPriority(i2.subject)) });
         }
 
-        // --- ТОЧКА КОНТРОЛЮ: Якщо лишився "хвіст" без пари для чергування ---
         classAltSuffixes.filter(s => !s.used).forEach(item => {
             item.used = true; 
-            unplaced.push(`⚠️ Немає пари для чергування: ${item.subject} (${cls.name}). Додайте ще 0.5 год іншого предмета.`);
+            unplaced.push(`⚠️ Немає пари для чергування: ${item.subject} (${cls.name})`);
         });
     });
 
-    // Додаємо одиночні уроки (семестрові 0.5 та цілі 1.0)
     flatWorkload.filter(w => !w.used).forEach(item => {
         item.used = true;
-        tasks.push({
-            type: 'single',
-            items: [item],
-            priority: getPriority(item.subject),
-            hours: item.currentHours
-        });
+        tasks.push({ type: 'single', items: [item], priority: getPriority(item.subject), hours: item.currentHours });
     });
 
-    // --- РАНДОМІЗАЦІЯ ТА СОРТУВАННЯ ---
-    // Перемішуємо масив, щоб однакові пріоритети не йшли підряд за списком
+    // Рандомізація в межах пріоритетів
     const shuffledTasks = tasks.sort(() => Math.random() - 0.5);
-    // Сортуємо стабільно за пріоритетом (1 -> 2 -> 3)
     shuffledTasks.sort((a, b) => a.priority - b.priority);
 
     // 3. РОЗСТАНОВКА
     shuffledTasks.forEach(task => {
-        const cls = state.classes.find(c => c.id === task.items[0].classId);
+        const item = task.items[0];
+        const cls = state.classes.find(c => c.id === item.classId);
         const className = cls ? cls.name : "Клас";
+        const priority = task.priority;
 
-        if (task.type === 'paired') {
-            const [t1, t2] = task.items;
-            let bestSlot = null;
-            let minPen = Infinity;
+        let bestSlot = null;
+        let minPen = Infinity;
+        const dayOffset = Math.floor(Math.random() * 5);
 
-            // Шукаємо випадковий старт для днів, щоб не було перекосу на Понеділок
-            const dayOffset = Math.floor(Math.random() * 5);
+        for (let d_raw = 0; d_raw < 5; d_raw++) {
+            let d = (d_raw + dayOffset) % 5;
+            for (let s = 1; s <= 7; s++) { // Тільки до 7 уроку
+                
+                // Базові конфлікти (вчитель або клас зайняті)
+                const isClassBusy = tempSchedule.some(ls => ls.day === d && ls.slot === s && ls.classId === item.classId);
+                let isTeacherBusy = false;
+                
+                if (task.type === 'paired') {
+                    isTeacherBusy = tempSchedule.some(ls => ls.day === d && ls.slot === s && (ls.teacherId === task.items[0].teacherId || ls.teacherId === task.items[1].teacherId));
+                } else {
+                    isTeacherBusy = tempSchedule.some(ls => ls.day === d && ls.slot === s && ls.teacherId === item.teacherId);
+                }
 
-            for (let d_raw = 0; d_raw < 5; d_raw++) {
-                let d = (d_raw + dayOffset) % 5; 
-                for (let s = 1; s <= 7; s++) {
-                    const t1Busy = tempSchedule.some(ls => ls.day === d && ls.slot === s && ls.teacherId === t1.teacherId);
-                    const t2Busy = tempSchedule.some(ls => ls.day === d && ls.slot === s && ls.teacherId === t2.teacherId);
-                    const classBusy = tempSchedule.some(ls => ls.day === d && ls.slot === s && ls.classId === t1.classId);
+                if (isClassBusy || isTeacherBusy) continue;
+
+                // --- ПЕРЕВІРКА ПОВТОРІВ ПРЕДМЕТА В ДЕНЬ ---
+                const countToday = tempSchedule.filter(ls => ls.day === d && ls.classId === item.classId && ls.subject === item.subject).length;
+                
+                if (countToday > 0) {
+                    // Якщо пріоритет 1 (Математика і тд) - КАТЕГОРИЧНА заборона другого уроку в день
+                    if (priority === 1) continue;
                     
-                    if (t1Busy || t2Busy || classBusy) continue;
+                    // Якщо пріоритет 2 або 3 - дозволяємо, але ТІЛЬКИ ПІДРЯД (спарені)
+                    const isAdjacent = tempSchedule.some(ls => ls.day === d && ls.classId === item.classId && ls.subject === item.subject && Math.abs(ls.slot - s) === 1);
+                    if (!isAdjacent) continue; // Не дозволяємо розривні однакові уроки (напр. 2-й та 5-й)
+                }
 
-                    let penalty = calculatePenalty(t1, d, s, tempSchedule, task.priority) + 
-                                  calculatePenalty(t2, d, s, tempSchedule, task.priority);
-                    
-                    // Додаємо дрібку рандому до штрафу, щоб урізноманітнити вибір при однакових умовах
-                    penalty += Math.random() * 5;
+                // Розрахунок штрафів
+                let penalty = 0;
+                if (task.type === 'paired') {
+                    penalty = calculatePenalty(task.items[0], d, s, tempSchedule, priority) + 
+                              calculatePenalty(task.items[1], d, s, tempSchedule, priority);
+                } else {
+                    penalty = calculatePenalty(item, d, s, tempSchedule, priority);
+                }
+                
+                penalty += Math.random() * 10; // Більше рандому для гнучкості
 
-                    if (penalty < minPen) { minPen = penalty; bestSlot = { d, s }; }
+                if (penalty < minPen) {
+                    minPen = penalty;
+                    bestSlot = { d, s };
                 }
             }
+        }
 
-            if (bestSlot) {
-                tempSchedule.push({ teacherId: t1.teacherId, classId: t1.classId, subject: t1.subject, day: bestSlot.d, slot: bestSlot.s, isAlternating: true });
-                tempSchedule.push({ teacherId: t2.teacherId, classId: t2.classId, subject: t2.subject, day: bestSlot.d, slot: bestSlot.s, isAlternating: true });
-            } else {
-                unplaced.push(`Не влізло чергування: ${t1.subject}/${t2.subject} (${className})`);
-            }
-        } else {
-            const item = task.items[0];
-            let bestSlot = null;
-            let minPen = Infinity;
-            const dayOffset = Math.floor(Math.random() * 5);
-
-            for (let d_raw = 0; d_raw < 5; d_raw++) {
-                let d = (d_raw + dayOffset) % 5;
-                for (let s = 1; s <= 7; s++) {
-                    const tBusy = tempSchedule.some(ls => ls.day === d && ls.slot === s && ls.teacherId === item.teacherId);
-                    const cBusy = tempSchedule.some(ls => ls.day === d && ls.slot === s && ls.classId === item.classId);
-                    if (tBusy || cBusy) continue;
-                    
-                    if (tempSchedule.some(ls => ls.day === d && ls.classId === item.classId && ls.subject === item.subject)) continue;
-
-                    let penalty = calculatePenalty(item, d, s, tempSchedule, task.priority);
-                    penalty += Math.random() * 5;
-                    
-                    if (penalty < minPen) { minPen = penalty; bestSlot = { d, s }; }
-                }
-            }
-
-            if (bestSlot) {
+        if (bestSlot) {
+            task.items.forEach(it => {
                 tempSchedule.push({ 
-                    teacherId: item.teacherId, classId: item.classId, subject: item.subject, 
+                    teacherId: it.teacherId, classId: it.classId, subject: it.subject, 
                     day: bestSlot.d, slot: bestSlot.s, 
-                    isAlternating: (item.currentHours === 0.5 && item.splitType === 'alternating')
+                    isAlternating: (it.currentHours === 0.5 && it.splitType === 'alternating')
                 });
-            } else {
-                const teacher = state.teachers.find(t => t.id === item.teacherId);
-                unplaced.push(`${item.subject} (${teacher ? teacher.name : '?'}) - ${className}`);
-            }
+            });
+        } else {
+            unplaced.push(`${task.type === 'paired' ? 'Чергування: ' + task.items[0].subject + '/' + task.items[1].subject : item.subject} - ${className}`);
         }
     });
 
