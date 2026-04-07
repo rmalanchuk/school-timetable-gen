@@ -638,7 +638,8 @@ function printSchedule() {
     const daysNames = ["ПОНЕДІЛОК", "ВІВТОРОК", "СЕРЕДА", "ЧЕТВЕР", "П'ЯТНИЦЯ"];
     const dateStr = new Date().toLocaleDateString('uk-UA');
 
-    const totalWidth = 200; 
+    // Зменшуємо загальну ширину до 199мм, щоб права межа не "з'їдалася" принтером
+    const totalWidth = 199; 
     const sideColsWidth = 20; 
     const teachersCount = state.teachers.length;
     const colWidth = (totalWidth - sideColsWidth) / teachersCount; 
@@ -666,25 +667,26 @@ function printSchedule() {
                     margin: 0 auto;
                     display: flex;
                     flex-direction: column;
-                    height: 285mm; /* Обмеження висоти для 1 сторінки */
+                    height: 285mm;
                 }
 
                 table { 
-                    width: 100%; 
+                    width: ${totalWidth}mm; 
                     border-collapse: collapse; 
                     table-layout: fixed;
-                    /* ФІКС ПРАВОЇ МЕЖІ: Тінь імітує бордер, який не зникає */
-                    box-shadow: 0 0 0 0.5mm black; 
-                    margin: 0.5mm; 
+                    /* Використовуємо border замість shadow, але з фіксованою шириною таблиці */
+                    border: 0.5mm solid black;
+                    margin-left: 0.5mm; /* Невеликий відступ зліва для центрування */
                 }
                 
                 th, td { 
                     border: 0.1mm solid black; 
                     text-align: center; 
                     padding: 0;
-                    height: 4.2mm; /* Ще трохи зменшив висоту для місця знизу */
+                    height: 4.2mm; 
                     overflow: hidden;
                     font-size: 8pt;
+                    box-sizing: border-box;
                 }
 
                 thead th { border-bottom: 0.7mm solid black !important; }
@@ -701,7 +703,7 @@ function printSchedule() {
                 }
 
                 .teacher-name-cell {
-                    height: 28mm; /* Компактна шапка */
+                    height: 28mm; 
                     writing-mode: vertical-lr;
                     transform: rotate(180deg);
                     font-weight: bold;
@@ -715,16 +717,13 @@ function printSchedule() {
                 .subject-code { font-size: 6pt; display: block; }
                 
                 .slot-0 { background-color: #fff9e6 !important; }
-                
                 h2 { text-align: center; font-size: 11pt; margin: 1mm 0; }
 
-                /* ЗОНА ДЛЯ НОТАТОК (Чиста) */
-                .notes-empty {
+                .notes-area {
                     margin-top: 10mm;
                     padding-left: 2mm;
-                    color: #000;
+                    font-weight: bold;
                     font-size: 10pt;
-                    flex-grow: 1;
                 }
             </style>
         </head>
@@ -771,9 +770,7 @@ function printSchedule() {
     });
 
     html += `</tbody></table>
-            <div class="notes-empty">
-                <strong>Нотатки:</strong>
-            </div>
+            <div class="notes-area">Нотатки:</div>
         </div>
         <script>
             window.onload = function() {
