@@ -249,15 +249,60 @@ function toggleAvailability(dayIndex, lessonIndex) {
 // --- ГЕНЕРАТОР РОЗКЛАДУ ---
 
 function generateSchedule() {
-    // 1. Підготовка: очищуємо старий розклад (крім ручних правок на 0 та 8 уроках)
-    // Якщо хочете повне перетирання, залиште просто state.schedule = [];
-    state.schedule = state.schedule.filter(s => s.slot === 0 || s.slot === 8);
+    const startTime = Date.now();
+    const maxDuration = 25000; // 25 секунд максимум
+    const maxAttempts = 500;   // Або 500 спроб
+    
+    let bestAttempt = {
+        schedule: [],
+        unplacedCount: Infinity,
+        unplacedList: []
+    };
 
-    const workload = [...state.workload];
-    const unplacedLessons = [];
+    let attempt = 0;
 
-    // Перемішуємо навантаження, щоб кожен раз розклад був трохи іншим
-    workload.sort(() => Math.random() - 0.5);
+    console.log("🚀 Починаємо серію спроб генерації...");
+
+    while (attempt < maxAttempts && (Date.now() - startTime) < maxDuration) {
+        attempt++;
+        
+        // Генеруємо одну спробу
+        const result = runSingleGeneration();
+
+        // Якщо ця спроба краща за попередню "найкращу" — зберігаємо її
+        if (result.unplaced.length < bestAttempt.unplacedCount) {
+            bestAttempt = {
+                schedule: JSON.parse(JSON.stringify(result.schedule)), // Глибока копія
+                unplacedCount: result.unplaced.length,
+                unplacedList: result.unplaced
+            };
+        }
+
+        // Якщо знайшли ідеальний варіант (0 помилок) — зупиняємось негайно
+        if (bestAttempt.unplacedCount === 0) {
+            console.log(`✅ Ідеальний розклад знайдено на спробі №${attempt}!`);
+            break;
+        }
+    }
+
+    // Записуємо найкращий знайдений результат у стан
+    state.schedule = bestAttempt.schedule;
+    
+    saveData();
+    renderSchedule();
+    
+    const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+    showGenerationReport(bestAttempt.unplacedList, attempt, duration);
+}
+
+// Виносимо логіку ОДНІЄЇ генерації в окрему функцію
+function runSingleGeneration() {
+    // Тимчасовий розклад для цієї спроби (зберігаємо 0 та 8 уроки)
+    let tempSchedule = state.schedule.filter(s => s.slot === 0 || s.slot === 8);
+    let unplaced = [];
+
+    // Копіюємо навантаження і мішаємо його
+    const workload = [...state.workload].sort(() => Math.random() - 0.5);
 
     workload.forEach(item => {
         const teacher = state.teachers.find(t => t.id === item.teacherId);
@@ -270,71 +315,73 @@ function generateSchedule() {
             let bestSlot = null;
             let minPenalty = Infinity;
 
-            // Перебираємо робочі дні (0-4) та робочі слоти (1-7)
             for (let d = 0; d < 5; d++) {
                 for (let s = 1; s <= 7; s++) {
-                    
-                    // КРИТИЧНІ ОБМЕЖЕННЯ (Hard Constraints)
-                    // Вчитель зайнятий або Клас зайнятий
-                    const teacherBusy = state.schedule.some(ls => ls.day === d && ls.slot === s && ls.teacherId === teacher.id);
-                    const classBusy = state.schedule.some(ls => ls.day === d && ls.slot === s && ls.classId === cls.id);
-                    
-                    if (teacherBusy || classBusy) continue;
+                    // Перевірки (ті самі, що були раніше)
+                    const tBusy = tempSchedule.some(ls => ls.day === d && ls.slot === s && ls.teacherId === teacher.id);
+                    const cBusy = tempSchedule.some(ls => ls.day === d && ls.slot === s && ls.classId === cls.id);
+                    if (tBusy || cBusy) continue;
 
-                    // ПРЕДМЕТНА ЛОГІКА: не більше одного такого ж предмета в одному класі на день
-                    const subjectInClassToday = state.schedule.some(ls => ls.day === d && ls.classId === cls.id && ls.subject === item.subject);
-                    if (subjectInClassToday) continue;
+                    const subInClass = tempSchedule.some(ls => ls.day === d && ls.classId === cls.id && ls.subject === item.subject);
+                    if (subInClass) continue;
 
-                    // ОБЧИСЛЕННЯ ШТРАФІВ (Soft Constraints)
                     let penalty = 0;
-
-                    // 1. Побажання вчителя (з модалки)
-                    if (teacher.availability && teacher.availability[d] && teacher.availability[d][s] === false) {
-                        penalty += 1000; // Дуже небажано, але можливо
-                    }
-
-                    // 2. Граничне навантаження вчителя на день (бажано не більше 5-6)
-                    const lessonsToday = state.schedule.filter(ls => ls.day === d && ls.teacherId === teacher.id).length;
-                    if (lessonsToday >= 6) penalty += 50;
-                    if (lessonsToday >= 7) penalty += 200;
-
-                    // 3. "Вікна" (кватирки) для вчителя
-                    // Перевіряємо, чи цей слот стоїть окремо від інших уроків вчителя
-                    const hasNeighbor = state.schedule.some(ls => ls.day === d && ls.teacherId === teacher.id && Math.abs(ls.slot - s) === 1);
-                    if (!hasNeighbor && lessonsToday > 0) {
-                        penalty += 30; // Штраф за потенційне вікно
-                    }
+                    if (teacher.availability?.[d]?.[s] === false) penalty += 1000;
+                    
+                    const tLessonsToday = tempSchedule.filter(ls => ls.day === d && ls.teacherId === teacher.id).length;
+                    if (tLessonsToday >= 6) penalty += 50;
+                    
+                    const hasNeighbor = tempSchedule.some(ls => ls.day === d && ls.teacherId === teacher.id && Math.abs(ls.slot - s) === 1);
+                    if (!hasNeighbor && tLessonsToday > 0) penalty += 30;
 
                     if (penalty < minPenalty) {
                         minPenalty = penalty;
                         bestSlot = { day: d, slot: s };
                     }
-                    
-                    if (minPenalty === 0) break; // Знайшли ідеальне місце, далі не шукаємо
+                    if (minPenalty === 0) break;
                 }
             }
 
             if (bestSlot) {
-                state.schedule.push({
-                    teacherId: teacher.id,
-                    classId: cls.id,
-                    subject: item.subject,
-                    day: bestSlot.day,
-                    slot: bestSlot.slot,
-                    isAlternating: hoursToPlace === 0.5 // якщо залишилось півгодини
+                tempSchedule.push({
+                    teacherId: teacher.id, classId: cls.id, subject: item.subject,
+                    day: bestSlot.day, slot: bestSlot.slot,
+                    isAlternating: hoursToPlace === 0.5
                 });
                 hoursToPlace -= (hoursToPlace >= 1 ? 1 : 0.5);
             } else {
-                // Якщо не знайшли жодного місця навіть зі штрафами
-                unplacedLessons.push(`${teacher.name} -> ${cls.name} (${item.subject})`);
-                break; 
+                unplaced.push(`${teacher.name} -> ${cls.name} (${item.subject})`);
+                break;
             }
         }
     });
 
-    saveData();
-    renderSchedule();
-    showGenerationReport(unplacedLessons);
+    return { schedule: tempSchedule, unplaced: unplaced };
+}
+
+// Оновлений звіт
+function showGenerationReport(errors, attempts, time) {
+    const output = document.getElementById('schedule-output');
+    const existingReport = document.getElementById('gen-report');
+    if (existingReport) existingReport.remove();
+
+    const isSuccess = errors.length === 0;
+    const reportHtml = `
+        <div id="gen-report" class="mt-4 p-4 ${isSuccess ? 'bg-green-50 border-green-500' : 'bg-orange-50 border-orange-500'} border-l-4 rounded shadow-sm">
+            <div class="flex justify-between items-center">
+                <h3 class="font-bold ${isSuccess ? 'text-green-800' : 'text-orange-800'}">
+                    ${isSuccess ? '✅ Ідеальний розклад!' : `⚠️ Майже готово (не влізло: ${errors.length})`}
+                </h3>
+                <span class="text-[10px] text-gray-500">Спроб: ${attempts} | Час: ${time}с</span>
+            </div>
+            ${errors.length > 0 ? `
+                <ul class="list-disc list-inside text-[11px] mt-2 text-orange-700">
+                    ${errors.map(e => `<li>${e}</li>`).join('')}
+                </ul>
+            ` : ''}
+        </div>
+    `;
+    output.insertAdjacentHTML('afterbegin', reportHtml);
 }
 
 function showGenerationReport(errors) {
