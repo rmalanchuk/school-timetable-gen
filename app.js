@@ -638,11 +638,11 @@ function printSchedule() {
     const daysNames = ["ПОНЕДІЛОК", "ВІВТОРОК", "СЕРЕДА", "ЧЕТВЕР", "П'ЯТНИЦЯ"];
     const dateStr = new Date().toLocaleDateString('uk-UA');
 
-    // РОЗРАХУНОК ГЕОМЕТРІЇ (в мм для А4)
-    const totalWidth = 200; // Робоча ширина листу з полями
+    // РОЗРАХУНОК ГЕОМЕТРІЇ (в мм для А4, жорстко зафіксовано)
+    const totalWidth = 200; // Робоча ширина листу (210мм А4 - поля)
     const sideColsWidth = 20; // ДН + №
     const teachersCount = state.teachers.length;
-    // Динамічна ширина колонки вчителя
+    // Динамічна ширина колонки вчителя (математично точна)
     const colWidth = (totalWidth - sideColsWidth) / teachersCount; 
 
     const formatName = (fullName) => {
@@ -656,7 +656,6 @@ function printSchedule() {
         <html>
         <head>
             <style>
-                /* ЖОРСТКА УСТАНОВКА А4 */
                 @page { 
                     size: A4 portrait; 
                     margin: 5mm; 
@@ -666,18 +665,25 @@ function printSchedule() {
                     padding: 0; 
                     font-family: "Arial Narrow", Arial, sans-serif; 
                     -webkit-print-color-adjust: exact;
+                    color: black;
                 }
                 
                 .page-wrapper {
                     width: 200mm;
                     margin: 0 auto;
+                    display: flex;
+                    flex-direction: column;
+                    height: 287mm; /* Висота А4 мінус поля */
                 }
 
                 table { 
                     width: 200mm; 
                     border-collapse: collapse; 
                     table-layout: fixed; /* ЗАБОРОНА БРАУЗЕРУ ЗМІНЮВАТИ ШИРИНУ */
-                    border: 0.5mm solid black;
+                    
+                    /* ФІКС МЕЖІ СПРАВА: Використовуємо outline замість border */
+                    outline: 0.5mm solid black; 
+                    border: none;
                 }
                 
                 /* СТАНДАРТНІ ЛІНІЇ */
@@ -685,7 +691,7 @@ function printSchedule() {
                     border: 0.1mm solid black; 
                     text-align: center; 
                     padding: 0;
-                    height: 5mm; /* Жорстка висота рядка */
+                    height: 4.8mm; /* Трохи зменшив висоту рядка, щоб звільнити місце снизу */
                     overflow: hidden;
                     font-size: 8pt;
                 }
@@ -706,22 +712,36 @@ function printSchedule() {
                 }
 
                 .teacher-name-cell {
-                    height: 35mm; /* Висота шапки з прізвищами */
+                    height: 30mm; /* Трохи зменшив висоту шапки */
                     writing-mode: vertical-lr;
                     transform: rotate(180deg);
                     font-weight: bold;
                     font-size: 9pt;
                     text-align: left;
-                    padding: 2mm 0;
+                    padding: 1.5mm 0;
                 }
 
                 .lesson-box { line-height: 1; }
                 .class-name { font-weight: bold; font-size: 9pt; display: block; }
-                .subject-name { font-size: 6.5pt; display: block; text-transform: lowercase; }
+                
+                /* ПОВЕРНУВ СКОРОЧЕННЯ ПРЕДМЕТІВ */
+                .subject-code { font-size: 6pt; display: block; text-transform: lowercase; }
                 
                 .slot-0 { background-color: #fff9e6 !important; }
                 
                 h2 { text-align: center; font-size: 12pt; margin: 2mm 0; }
+
+                /* БЛОК НОТАТОК (займає залишок місця знизу) */
+                .notes-section {
+                    margin-top: 5mm;
+                    border-top: 1px dashed #666;
+                    padding-top: 2mm;
+                    color: #444;
+                    font-size: 9pt;
+                    flex-grow: 1; /* Гнучко розширюється */
+                }
+                .notes-title { font-weight: bold; margin-bottom: 3mm; }
+                .notes-line { border-bottom: 0.1mm solid #ccc; height: 6mm; width: 100%; }
             </style>
         </head>
         <body>
@@ -761,10 +781,13 @@ function printSchedule() {
                 
                 if (lesson) {
                     const clsName = state.classes.find(c => c.id == lesson.classId)?.name || '';
+                    // ВИКОРИСТОВУЄМО КОД ПРЕДМЕТУ (getSubjectCode), А НЕ ПОВНУ НАЗВУ
+                    const rawCode = typeof getSubjectCode === 'function' ? getSubjectCode(lesson.subject) : lesson.subject;
+
                     html += `<td class="${s0}">
                         <div class="lesson-box">
                             <span class="class-name">${clsName}</span>
-                            <span class="subject-name">${lesson.subject}</span>
+                            <span class="subject-code">${rawCode}</span>
                         </div>
                     </td>`;
                 } else {
@@ -776,8 +799,13 @@ function printSchedule() {
     });
 
     html += `</tbody></table>
-            <div style="margin-top: 10mm; border-top: 1px dashed #ccc; padding-top: 2mm; color: #666; font-size: 9pt;">
-                Нотатки:
+            <div class="notes-section">
+                <div class="notes-title">Нотатки:</div>
+                <div class="notes-line"></div>
+                <div class="notes-line"></div>
+                <div class="notes-line"></div>
+                <div class="notes-line"></div>
+                <div class="notes-line"></div>
             </div>
         </div>
         <script>
@@ -790,6 +818,7 @@ function printSchedule() {
     printWindow.document.write(html);
     printWindow.document.close();
 }
+
 function getSubjectCode(subject) {
     if (!subject) return "";
     const words = subject.trim().split(/\s+/);
