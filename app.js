@@ -638,84 +638,137 @@ function printSchedule() {
     const daysNames = ["ПОНЕДІЛОК", "ВІВТОРОК", "СЕРЕДА", "ЧЕТВЕР", "П'ЯТНИЦЯ"];
     const dateStr = new Date().toLocaleDateString('uk-UA');
 
+    // РОЗРАХУНОК ГЕОМЕТРІЇ (в мм для А4)
+    const totalWidth = 200; // Робоча ширина листу з полями
+    const sideColsWidth = 20; // ДН + №
+    const teachersCount = state.teachers.length;
+    // Динамічна ширина колонки вчителя
+    const colWidth = (totalWidth - sideColsWidth) / teachersCount; 
+
     const formatName = (fullName) => {
         if (!fullName) return "";
         const parts = fullName.trim().split(/\s+/);
-        return `${parts[0]} ${parts.slice(1).map(p => p[0].toUpperCase() + ".").join(" ")}`;
+        // Компактно: Прізвище + І.І.
+        return parts[0] + (parts[1] ? ` ${parts[1][0]}.` : "") + (parts[2] ? `${parts[2][0]}.` : "");
     };
 
     let html = `
         <html>
         <head>
             <style>
-                @page { size: A4 portrait; margin: 5mm; }
-                body { font-family: 'Segoe UI', Arial, sans-serif; margin: 0; padding: 0; }
-                table { width: 100%; border-collapse: collapse; table-layout: fixed; border: 1.5pt solid #000; }
-                th, td { border: 0.5pt solid #000; text-align: center; padding: 0; box-sizing: border-box; height: 20px; vertical-align: middle; }
+                /* ЖОРСТКА УСТАНОВКА А4 */
+                @page { 
+                    size: A4 portrait; 
+                    margin: 5mm; 
+                }
+                body { 
+                    margin: 0; 
+                    padding: 0; 
+                    font-family: "Arial Narrow", Arial, sans-serif; 
+                    -webkit-print-color-adjust: exact;
+                }
                 
-                /* Жирна лінія під іменами вчителів */
-                thead th { border-bottom: 2.5pt solid #000 !important; }
-                
-                /* Клас для жирної лінії В КІНЦІ дня */
-                .day-end-row td { border-bottom: 2.5pt solid #000 !important; }
+                .page-wrapper {
+                    width: 200mm;
+                    margin: 0 auto;
+                }
 
-                .corner-cell { font-size: 7px !important; font-weight: bold; width: 18px; }
-                .col-num { width: 16px; font-size: 8px !important; color: #333; }
-                .day-cell { font-weight: bold; writing-mode: vertical-lr; transform: rotate(180deg); font-size: 9px; width: 18px; background-color: #f1f5f9 !important; }
-                th.teacher-name { height: 110px; writing-mode: vertical-lr; transform: rotate(180deg); white-space: nowrap; font-size: 10px; font-weight: bold; text-align: left; padding: 5px 2px; background-color: #f8fafc !important; }
+                table { 
+                    width: 200mm; 
+                    border-collapse: collapse; 
+                    table-layout: fixed; /* ЗАБОРОНА БРАУЗЕРУ ЗМІНЮВАТИ ШИРИНУ */
+                    border: 0.5mm solid black;
+                }
                 
-                .lesson-box { display: block; width: 100%; line-height: 1; }
-                .class-name { font-size: 9px !important; font-weight: 800; display: block; margin-top: 1px; }
-                .sub-code { font-size: 6.5px !important; font-weight: 400; text-transform: lowercase; display: block; margin-bottom: 1px; }
-                .slot-0 { background-color: #fffaf0 !important; }
+                /* СТАНДАРТНІ ЛІНІЇ */
+                th, td { 
+                    border: 0.1mm solid black; 
+                    text-align: center; 
+                    padding: 0;
+                    height: 5mm; /* Жорстка висота рядка */
+                    overflow: hidden;
+                    font-size: 8pt;
+                }
+
+                /* ЖИРНІ ЛІНІЇ (Хедер та роздільники днів) */
+                thead th { border-bottom: 0.6mm solid black !important; }
+                .day-boundary td { border-top: 0.6mm solid black !important; }
+
+                /* КОЛОНКИ */
+                .col-day { width: 12mm; font-weight: bold; font-size: 7pt; }
+                .col-num { width: 8mm; background-color: #f0f0f0 !important; font-weight: bold; }
+                .col-teacher { width: ${colWidth}mm; }
+
+                .day-text {
+                    writing-mode: vertical-lr;
+                    transform: rotate(180deg);
+                    white-space: nowrap;
+                }
+
+                .teacher-name-cell {
+                    height: 35mm; /* Висота шапки з прізвищами */
+                    writing-mode: vertical-lr;
+                    transform: rotate(180deg);
+                    font-weight: bold;
+                    font-size: 9pt;
+                    text-align: left;
+                    padding: 2mm 0;
+                }
+
+                .lesson-box { line-height: 1; }
+                .class-name { font-weight: bold; font-size: 9pt; display: block; }
+                .subject-name { font-size: 6.5pt; display: block; text-transform: lowercase; }
+                
+                .slot-0 { background-color: #fff9e6 !important; }
+                
+                h2 { text-align: center; font-size: 12pt; margin: 2mm 0; }
             </style>
         </head>
         <body>
-            <h2 style="text-align:center; font-size:11px; margin:2mm 0;">ЗВЕДЕНИЙ РОЗКЛАД (${dateStr})</h2>
-            <table>
-                <thead>
-                    <tr>
-                        <th class="corner-cell">ДН</th> <th class="col-num">№</th>
-                        ${state.teachers.map(t => `<th class="teacher-name">${formatName(t.name)}</th>`).join('')}
-                    </tr>
-                </thead>
-                <tbody>
+            <div class="page-wrapper">
+                <h2>ЗВЕДЕНИЙ РОЗКЛАД (${dateStr})</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th class="col-day">ДН</th>
+                            <th class="col-num">№</th>
+                            ${state.teachers.map(t => `<th class="col-teacher teacher-name-cell">${formatName(t.name)}</th>`).join('')}
+                        </tr>
+                    </thead>
+                    <tbody>
     `;
 
     daysNames.forEach((dayName, dayIdx) => {
         const dayHasZeroSlot = state.schedule.some(s => s.day === dayIdx && s.slot === 0);
         const startSlot = dayHasZeroSlot ? 0 : 1;
-        const totalRowsForDay = 9 - startSlot;
+        const totalRows = 9 - startSlot;
 
         for (let slotIdx = startSlot; slotIdx <= 8; slotIdx++) {
-            // Малюємо жирну лінію ЗНИЗУ останнього уроку кожного дня (крім п'ятниці, там межа таблиці)
-            const isLastRowOfDay = (slotIdx === 8);
-            const needsSeparator = (isLastRowOfDay && dayIdx < 4);
-            const rowClass = needsSeparator ? 'class="day-end-row"' : '';
-
-            html += `<tr ${rowClass}>`;
+            const isFirstRow = (slotIdx === startSlot);
+            const isBoundary = (isFirstRow && dayIdx > 0);
             
-            if (slotIdx === startSlot) {
-                html += `<td rowspan="${totalRowsForDay}" class="day-cell">${dayName}</td>`;
+            html += `<tr class="${isBoundary ? 'day-boundary' : ''}">`;
+            
+            if (isFirstRow) {
+                html += `<td rowspan="${totalRows}" class="col-day"><span class="day-text">${dayName}</span></td>`;
             }
             
             html += `<td class="col-num ${slotIdx === 0 ? 'slot-0' : ''}">${slotIdx}</td>`;
 
             state.teachers.forEach(teacher => {
                 const lesson = state.schedule.find(s => s.day === dayIdx && s.slot === slotIdx && s.teacherId == teacher.id);
-                const slot0Class = slotIdx === 0 ? 'slot-0' : '';
+                const s0 = slotIdx === 0 ? 'slot-0' : '';
                 
                 if (lesson) {
                     const clsName = state.classes.find(c => c.id == lesson.classId)?.name || '';
-                    const rawCode = typeof getSubjectCode === 'function' ? getSubjectCode(lesson.subject) : lesson.subject;
-                    html += `<td class="${slot0Class}">
+                    html += `<td class="${s0}">
                         <div class="lesson-box">
                             <span class="class-name">${clsName}</span>
-                            <span class="sub-code">${rawCode}</span>
+                            <span class="subject-name">${lesson.subject}</span>
                         </div>
                     </td>`;
                 } else {
-                    html += `<td class="${slot0Class}"></td>`;
+                    html += `<td class="${s0}"></td>`;
                 }
             });
             html += `</tr>`;
@@ -723,13 +776,20 @@ function printSchedule() {
     });
 
     html += `</tbody></table>
-    <script>window.onload = function() { setTimeout(() => { window.print(); window.close(); }, 300); };</script>
+            <div style="margin-top: 10mm; border-top: 1px dashed #ccc; padding-top: 2mm; color: #666; font-size: 9pt;">
+                Нотатки:
+            </div>
+        </div>
+        <script>
+            window.onload = function() {
+                setTimeout(() => { window.print(); window.close(); }, 500);
+            };
+        </script>
     </body></html>`;
     
     printWindow.document.write(html);
     printWindow.document.close();
 }
-
 function getSubjectCode(subject) {
     if (!subject) return "";
     const words = subject.trim().split(/\s+/);
