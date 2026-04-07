@@ -766,20 +766,17 @@ function renderSchedule() {
 
     const currentSchedule = state.schedule || [];
 
-    // Функція для форматування Прізвище І.Б.
     const formatNameForTable = (fullName) => {
         if (!fullName) return "";
         const parts = fullName.trim().split(/\s+/);
         const lastName = parts[0] || "";
         const firstNameInitial = parts[1] ? ` ${parts[1][0]}.` : "";
         const middleNameInitial = parts[2] ? `${parts[2][0]}.` : "";
-        
         return `${lastName}<span class="initials">${firstNameInitial}${middleNameInitial}</span>`;
     };
 
     const daysNames = ["Понеділок", "Вівторок", "Середа", "Четвер", "П'ятниця"];
     
-    // table-fixed прибираємо, щоб колонки адаптувалися під вузький вертикальний текст
     let html = `<div class="overflow-x-auto bg-white rounded-xl shadow-md border border-gray-200">
         <table class="w-full border-collapse text-[10px]">
             <thead>
@@ -798,7 +795,6 @@ function renderSchedule() {
         for (let slotIdx = 0; slotIdx <= 8; slotIdx++) {
             html += `<tr class="${slotIdx === 8 ? 'border-b-2 border-b-slate-300' : 'border-b border-gray-100'} hover:bg-blue-50/30">`;
 
-            // Малюємо назву дня лише для першого слота (0-го уроку)
             if (slotIdx === 0) {
                 html += `<td rowspan="9" class="bg-slate-50 border-r text-center font-bold text-slate-500 uppercase [writing-mode:vertical-lr] rotate-180 p-2">${dayName}</td>`;
             }
@@ -806,23 +802,43 @@ function renderSchedule() {
             html += `<td class="text-center border-r p-1 ${slotIdx === 0 ? 'text-orange-600 font-bold bg-orange-50/50' : 'text-gray-400'}">${slotIdx}</td>`;
 
             state.teachers.forEach(teacher => {
-                const lesson = currentSchedule.find(s => s.day == dayIdx && s.slot == slotIdx && s.teacherId == teacher.id);
-                const cls = lesson ? state.classes.find(c => c.id == lesson.classId) : null;
+                // Знаходимо ВСІ уроки вчителя в цьому слоті
+                const teacherLessons = currentSchedule.filter(s => s.day == dayIdx && s.slot == slotIdx && s.teacherId == teacher.id);
                 
-                const cellValue = lesson ? `${cls?.name || ''} ${lesson.subject}`.trim() : '';
-                const altMarker = lesson?.isAlternating ? '<span class="alternating-marker">○</span>' : '';
+                let cellContent = '';
+                
+                if (teacherLessons.length > 0) {
+                    const cls = state.classes.find(c => c.id == teacherLessons[0].classId);
+                    const isInternalAlt = teacherLessons.length > 1; // Більше одного предмета у одного вчителя
+                    const isExternalAlt = teacherLessons.length === 1 && teacherLessons[0].isAlternating;
+
+                    // Визначаємо клас маркера
+                    let markerClass = '';
+                    if (isInternalAlt) markerClass = 'marker-internal'; // Фіолетовий (сам із собою)
+                    else if (isExternalAlt) markerClass = 'marker-external'; // Синій (з колегою)
+
+                    const altMarker = (isInternalAlt || isExternalAlt) ? `<span class="alt-circle ${markerClass}">○</span>` : '';
+                    
+                    // Виводимо назву предмета (якщо їх два - через слеш)
+                    const subjectsText = teacherLessons.map(l => l.subject).join(' / ');
+
+                    cellContent = `
+                        <div class="w-full h-full flex flex-col justify-center items-center bg-blue-50 py-1 relative">
+                            <span class="block text-blue-900 font-bold leading-none text-[11px]">
+                                ${cls?.name || ''}${altMarker}
+                            </span>
+                            <span class="text-blue-700 text-[8px] truncate max-w-[45px] mt-0.5" title="${subjectsText}">
+                                ${subjectsText}
+                            </span>
+                        </div>`;
+                }
 
                 html += `
-                    <td class="p-0 border-r border-gray-100 min-w-[35px]">
+                    <td class="p-0 border-r border-gray-100 min-w-[40px]">
                         <div contenteditable="true" 
                              onblur="updateManualLesson('${teacher.id}', ${dayIdx}, ${slotIdx}, this)"
                              class="min-h-[40px] flex items-center justify-center outline-none focus:bg-yellow-50 transition-colors">
-                            ${lesson ? `
-                                <div class="w-full h-full flex flex-col justify-center items-center bg-blue-50 py-1">
-                                    <span class="block text-blue-900 font-bold leading-none text-[11px]">${cls?.name || ''}${altMarker}</span>
-                                    <span class="text-blue-700 text-[8px] truncate max-w-[32px] mt-0.5">${lesson.subject}</span>
-                                </div>
-                            ` : cellValue}
+                            ${cellContent}
                         </div>
                     </td>`;
             });
