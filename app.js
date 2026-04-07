@@ -581,25 +581,32 @@ function renderSchedule() {
     const container = document.getElementById('schedule-output');
     if (!container) return;
 
-    // Визначаємо, який масив даних використовувати
-    // Якщо у нас є посеместровий поділ, тут пізніше додамо перемикач, 
-    // а поки беремо основний розклад
     const currentSchedule = state.schedule || [];
 
+    // Функція для форматування Прізвище І.Б.
     const formatNameForTable = (fullName) => {
         if (!fullName) return "";
         const parts = fullName.trim().split(/\s+/);
-        return parts[0].toUpperCase();
+        const lastName = parts[0] || "";
+        const firstNameInitial = parts[1] ? ` ${parts[1][0]}.` : "";
+        const middleNameInitial = parts[2] ? `${parts[2][0]}.` : "";
+        
+        return `${lastName}<span class="initials">${firstNameInitial}${middleNameInitial}</span>`;
     };
 
     const daysNames = ["Понеділок", "Вівторок", "Середа", "Четвер", "П'ятниця"];
+    
+    // table-fixed прибираємо, щоб колонки адаптувалися під вузький вертикальний текст
     let html = `<div class="overflow-x-auto bg-white rounded-xl shadow-md border border-gray-200">
-        <table class="w-full border-collapse table-fixed text-[10px]">
+        <table class="w-full border-collapse text-[10px]">
             <thead>
                 <tr class="bg-slate-100 text-slate-700 uppercase">
                     <th class="w-12 border-b border-r p-2">День</th>
-                    <th class="w-10 border-b border-r p-2">№</th>
-                    ${state.teachers.map(t => `<th class="border-b border-r p-2 truncate">${formatNameForTable(t.name)}</th>`).join('')}
+                    <th class="w-8 border-b border-r p-2">№</th>
+                    ${state.teachers.map(t => `
+                        <th class="border-b border-r vertical-th bg-slate-50 text-slate-700 font-bold">
+                            ${formatNameForTable(t.name)}
+                        </th>`).join('')}
                 </tr>
             </thead>
             <tbody>`;
@@ -608,31 +615,29 @@ function renderSchedule() {
         for (let slotIdx = 0; slotIdx <= 8; slotIdx++) {
             html += `<tr class="${slotIdx === 8 ? 'border-b-2 border-b-slate-300' : 'border-b border-gray-100'} hover:bg-blue-50/30">`;
 
+            // Малюємо назву дня лише для першого слота (0-го уроку)
             if (slotIdx === 0) {
-                html += `<td rowspan="9" class="bg-slate-50 border-r text-center font-bold text-slate-500 uppercase [writing-mode:vertical-lr] rotate-180">${dayName}</td>`;
+                html += `<td rowspan="9" class="bg-slate-50 border-r text-center font-bold text-slate-500 uppercase [writing-mode:vertical-lr] rotate-180 p-2">${dayName}</td>`;
             }
 
-            html += `<td class="text-center border-r p-2 ${slotIdx === 0 ? 'text-orange-600 font-bold bg-orange-50/50' : 'text-gray-400'}">${slotIdx}</td>`;
+            html += `<td class="text-center border-r p-1 ${slotIdx === 0 ? 'text-orange-600 font-bold bg-orange-50/50' : 'text-gray-400'}">${slotIdx}</td>`;
 
             state.teachers.forEach(teacher => {
                 const lesson = currentSchedule.find(s => s.day == dayIdx && s.slot == slotIdx && s.teacherId == teacher.id);
                 const cls = lesson ? state.classes.find(c => c.id == lesson.classId) : null;
                 
-                // Текст для пустих клітинок (щоб можна було вписати руками)
                 const cellValue = lesson ? `${cls?.name || ''} ${lesson.subject}`.trim() : '';
-
-                // МІТКА КРУЖЕЧКА: якщо урок чергується, додаємо червоне "○"
-                const altMarker = lesson?.isAlternating ? '<span class="text-red-600 ml-1 font-bold">○</span>' : '';
+                const altMarker = lesson?.isAlternating ? '<span class="alternating-marker">○</span>' : '';
 
                 html += `
-                    <td class="p-1 border-r border-gray-100">
+                    <td class="p-0 border-r border-gray-100 min-w-[35px]">
                         <div contenteditable="true" 
                              onblur="updateManualLesson('${teacher.id}', ${dayIdx}, ${slotIdx}, this)"
-                             class="min-h-[35px] p-1 rounded text-center outline-none focus:bg-yellow-50 transition-colors">
+                             class="min-h-[40px] flex items-center justify-center outline-none focus:bg-yellow-50 transition-colors">
                             ${lesson ? `
-                                <div class="bg-blue-100 border border-blue-200 rounded py-1 shadow-sm pointer-events-none">
-                                    <span class="block text-blue-900 font-bold leading-none">${cls?.name || ''}${altMarker}</span>
-                                    <span class="text-blue-700 text-[9px] lowercase">${lesson.subject}</span>
+                                <div class="w-full h-full flex flex-col justify-center items-center bg-blue-50 py-1">
+                                    <span class="block text-blue-900 font-bold leading-none text-[11px]">${cls?.name || ''}${altMarker}</span>
+                                    <span class="text-blue-700 text-[8px] truncate max-w-[32px] mt-0.5">${lesson.subject}</span>
                                 </div>
                             ` : cellValue}
                         </div>
