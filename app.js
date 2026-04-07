@@ -297,9 +297,11 @@ function generateSchedule() {
 
 // 2. Логіка однієї конкретної спроби
 function runSingleGeneration() {
-    let tempSchedule = state.schedule.filter(s => s.slot === 0 || s.slot === 8);
+    // 0. Беремо ТІЛЬКИ 0-й урок (якщо він є). 8-й ігноруємо повністю, ніби його не існує.
+    let tempSchedule = state.schedule.filter(s => s.slot === 0);
     let unplaced = [];
     
+    // 1. ПІДГОТОВКА НАВАНТАЖЕННЯ
     const flatWorkload = [];
     state.workload.forEach(item => {
         let h = parseFloat(item.hours);
@@ -307,21 +309,16 @@ function runSingleGeneration() {
             flatWorkload.push({ ...item, currentHours: 1, used: false });
             h -= 1;
         }
-        if (h === 0.5) {
-            flatWorkload.push({ ...item, currentHours: 0.5, used: false });
-        }
+        if (h === 0.5) flatWorkload.push({ ...item, currentHours: 0.5, used: false });
     });
 
     const tasks = [];
     const classesIds = [...new Set(state.classes.map(c => c.id))];
     
+    // 2. ГРУПУВАННЯ ЧЕРГУВАНЬ (без змін)
     classesIds.forEach(cId => {
-        const cls = state.classes.find(c => c.id === cId);
-        let classAltSuffixes = flatWorkload.filter(w => 
-            w.classId === cId && w.currentHours === 0.5 && w.splitType === 'alternating' && !w.used
-        );
+        let classAltSuffixes = flatWorkload.filter(w => w.classId === cId && w.currentHours === 0.5 && w.splitType === 'alternating' && !w.used);
         
-        // --- ЕТАП А: Внутрішнє чергування ---
         const teacherIds = [...new Set(classAltSuffixes.map(s => s.teacherId))];
         teacherIds.forEach(tId => {
             let tSuffixes = classAltSuffixes.filter(s => s.teacherId === tId && !s.used);
@@ -332,7 +329,6 @@ function runSingleGeneration() {
             }
         });
 
-        // --- ЕТАП Б: Зовнішнє чергування ---
         classAltSuffixes = classAltSuffixes.filter(s => !s.used);
         while (classAltSuffixes.length >= 2) {
             const i1 = classAltSuffixes.shift(); const i2 = classAltSuffixes.shift();
@@ -342,68 +338,66 @@ function runSingleGeneration() {
 
         classAltSuffixes.filter(s => !s.used).forEach(item => {
             item.used = true; 
-            unplaced.push(`⚠️ Немає пари для чергування: ${item.subject} (${cls.name})`);
+            unplaced.push(`⚠️ Немає пари для чергування: ${item.subject} (${state.classes.find(c => c.id === cId)?.name})`);
         });
     });
 
     flatWorkload.filter(w => !w.used).forEach(item => {
         item.used = true;
-        tasks.push({ type: 'single', items: [item], priority: getPriority(item.subject), hours: item.currentHours });
+        tasks.push({ type: 'single', items: [item], priority: getPriority(item.subject) });
     });
 
-    // Рандомізація в межах пріоритетів
-    const shuffledTasks = tasks.sort(() => Math.random() - 0.5);
-    shuffledTasks.sort((a, b) => a.priority - b.priority);
+    // Сортування (складні вперед + рандом)
+    tasks.sort(() => Math.random() - 0.5);
+    tasks.sort((a, b) => a.priority - b.priority);
 
-    // 3. РОЗСТАНОВКА
-    shuffledTasks.forEach(task => {
-        const item = task.items[0];
-        const cls = state.classes.find(c => c.id === item.classId);
-        const className = cls ? cls.name : "Клас";
+    // 3. ЦИКЛ РОЗСТАНОВКИ (ОБМЕЖЕНИЙ 7 УРОКАМИ)
+    tasks.forEach(task => {
+        const firstItem = task.items[0];
         const priority = task.priority;
-
         let bestSlot = null;
         let minPen = Infinity;
+
         const dayOffset = Math.floor(Math.random() * 5);
 
         for (let d_raw = 0; d_raw < 5; d_raw++) {
             let d = (d_raw + dayOffset) % 5;
-            for (let s = 1; s <= 7; s++) { // Тільки до 7 уроку
+            
+            // СУВОРИЙ ЛІМІТ: s від 1 до 7. 8-й урок ніколи не буде обраний.
+            for (let s = 1; s <= 7; s++) {
                 
-                // Базові конфлікти (вчитель або клас зайняті)
-                const isClassBusy = tempSchedule.some(ls => ls.day === d && ls.slot === s && ls.classId === item.classId);
-                let isTeacherBusy = false;
-                
-                if (task.type === 'paired') {
-                    isTeacherBusy = tempSchedule.some(ls => ls.day === d && ls.slot === s && (ls.teacherId === task.items[0].teacherId || ls.teacherId === task.items[1].teacherId));
-                } else {
-                    isTeacherBusy = tempSchedule.some(ls => ls.day === d && ls.slot === s && ls.teacherId === item.teacherId);
-                }
+                // Конфлікт класу (клас уже має урок у цьому слоті)
+                if (tempSchedule.some(ls => ls.day === d && ls.slot === s && ls.classId === firstItem.classId)) continue;
 
-                if (isClassBusy || isTeacherBusy) continue;
+                // Конфлікт вчителя (вчитель уже веде інший урок)
+                const isTeacherBusy = task.items.some(it => 
+                    tempSchedule.some(ls => ls.day === d && ls.slot === s && ls.teacherId === it.teacherId)
+                );
+                if (isTeacherBusy) continue;
 
-                // --- ПЕРЕВІРКА ПОВТОРІВ ПРЕДМЕТА В ДЕНЬ ---
-                const countToday = tempSchedule.filter(ls => ls.day === d && ls.classId === item.classId && ls.subject === item.subject).length;
-                
+                // Заборона на повтор складних предметів (пріоритет 1)
+                const countToday = tempSchedule.filter(ls => ls.day === d && ls.classId === firstItem.classId && ls.subject === firstItem.subject).length;
                 if (countToday > 0) {
-                    // Якщо пріоритет 1 (Математика і тд) - КАТЕГОРИЧНА заборона другого уроку в день
-                    if (priority === 1) continue;
-                    
-                    // Якщо пріоритет 2 або 3 - дозволяємо, але ТІЛЬКИ ПІДРЯД (спарені)
-                    const isAdjacent = tempSchedule.some(ls => ls.day === d && ls.classId === item.classId && ls.subject === item.subject && Math.abs(ls.slot - s) === 1);
-                    if (!isAdjacent) continue; // Не дозволяємо розривні однакові уроки (напр. 2-й та 5-й)
+                    if (priority === 1) continue; 
+                    const isAdjacent = tempSchedule.some(ls => ls.day === d && ls.classId === firstItem.classId && ls.subject === firstItem.subject && Math.abs(ls.slot - s) === 1);
+                    if (!isAdjacent) continue;
                 }
 
-                // Розрахунок штрафів
+                // РОЗРАХУНОК ШТРАФУ
                 let penalty = 0;
-                if (task.type === 'paired') {
-                    penalty = calculatePenalty(task.items[0], d, s, tempSchedule, priority) + 
-                              calculatePenalty(task.items[1], d, s, tempSchedule, priority);
-                } else {
-                    penalty = calculatePenalty(item, d, s, tempSchedule, priority);
-                }
                 
-                penalty += Math.random() * 10; // Більше рандому для гнучкості
+                task.items.forEach(it => {
+                    const status = getTeacherStatus(it.teacherId, d, s); 
+                    if (status === 2) penalty += 50000; // Червона зона (але не смерть уроку)
+                    if (status === 1) penalty += 1000;  // Жовта зона
+                });
+
+                // Додатковий штраф за пізні уроки (6-й та 7-й), щоб ШІ намагався ставити раніше
+                if (s === 6) penalty += 100;
+                if (s === 7) penalty += 300;
+
+                penalty += calculatePenalty(firstItem, d, s, tempSchedule, priority);
+                penalty += Math.random() * 20;
 
                 if (penalty < minPen) {
                     minPen = penalty;
@@ -421,7 +415,8 @@ function runSingleGeneration() {
                 });
             });
         } else {
-            unplaced.push(`${task.type === 'paired' ? 'Чергування: ' + task.items[0].subject + '/' + task.items[1].subject : item.subject} - ${className}`);
+            const tName = state.teachers.find(t => t.id === firstItem.teacherId)?.name || '???';
+            unplaced.push(`${firstItem.subject} (${tName}) - ${state.classes.find(c => c.id === firstItem.classId)?.name}`);
         }
     });
 
