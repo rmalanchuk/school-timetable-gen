@@ -638,7 +638,6 @@ function printSchedule() {
     const daysNames = ["ПОНЕДІЛОК", "ВІВТОРОК", "СЕРЕДА", "ЧЕТВЕР", "П'ЯТНИЦЯ"];
     const dateStr = new Date().toLocaleDateString('uk-UA');
 
-    // Зменшуємо загальну ширину до 199мм, щоб права межа не "з'їдалася" принтером
     const totalWidth = 199; 
     const sideColsWidth = 20; 
     const teachersCount = state.teachers.length;
@@ -656,75 +655,46 @@ function printSchedule() {
             <style>
                 @page { size: A4 portrait; margin: 5mm; }
                 body { 
-                    margin: 0; 
-                    padding: 0; 
+                    margin: 0; padding: 0; 
                     font-family: "Arial Narrow", Arial, sans-serif; 
                     -webkit-print-color-adjust: exact;
                 }
-                
-                .page-wrapper {
-                    width: 200mm;
-                    margin: 0 auto;
-                    display: flex;
-                    flex-direction: column;
-                    height: 285mm;
-                }
-
+                .page-wrapper { width: 200mm; margin: 0 auto; }
                 table { 
                     width: ${totalWidth}mm; 
                     border-collapse: collapse; 
                     table-layout: fixed;
-                    /* Використовуємо border замість shadow, але з фіксованою шириною таблиці */
                     border: 0.5mm solid black;
-                    margin-left: 0.5mm; /* Невеликий відступ зліва для центрування */
+                    margin-left: 0.5mm;
                 }
-                
                 th, td { 
                     border: 0.1mm solid black; 
                     text-align: center; 
                     padding: 0;
-                    height: 4.2mm; 
+                    height: 3.8mm; 
                     overflow: hidden;
                     font-size: 8pt;
                     box-sizing: border-box;
                 }
-
                 thead th { border-bottom: 0.7mm solid black !important; }
                 .day-boundary td { border-top: 0.7mm solid black !important; }
-
                 .col-day { width: 12mm; font-weight: bold; font-size: 7pt; }
                 .col-num { width: 8mm; background-color: #f0f0f0 !important; font-weight: bold; }
                 .col-teacher { width: ${colWidth}mm; }
-
-                .day-text {
-                    writing-mode: vertical-lr;
-                    transform: rotate(180deg);
-                    white-space: nowrap;
-                }
-
+                .day-text { writing-mode: vertical-lr; transform: rotate(180deg); white-space: nowrap; }
                 .teacher-name-cell {
-                    height: 28mm; 
+                    height: 25mm; 
                     writing-mode: vertical-lr;
                     transform: rotate(180deg);
-                    font-weight: bold;
-                    font-size: 9pt;
-                    text-align: left;
-                    padding: 1.5mm 0;
+                    font-weight: bold; font-size: 8.5pt;
+                    text-align: left; padding: 1mm 0;
                 }
-
-                .lesson-box { line-height: 1; }
-                .class-name { font-weight: bold; font-size: 8.5pt; display: block; }
-                .subject-code { font-size: 6pt; display: block; }
-                
+                .lesson-box { line-height: 0.9; }
+                .class-name { font-weight: bold; font-size: 8pt; display: block; }
+                .subject-code { font-size: 5.5pt; display: block; }
                 .slot-0 { background-color: #fff9e6 !important; }
                 h2 { text-align: center; font-size: 11pt; margin: 1mm 0; }
-
-                .notes-area {
-                    margin-top: 10mm;
-                    padding-left: 2mm;
-                    font-weight: bold;
-                    font-size: 10pt;
-                }
+                .notes-area { margin-top: 3mm; padding-left: 2mm; font-weight: bold; font-size: 10pt; }
             </style>
         </head>
         <body>
@@ -742,25 +712,44 @@ function printSchedule() {
     `;
 
     daysNames.forEach((dayName, dayIdx) => {
-        const dayHasZeroSlot = state.schedule.some(s => s.day === dayIdx && s.slot === 0);
-        const startSlot = dayHasZeroSlot ? 0 : 1;
-        const totalRows = 9 - startSlot;
+        // Динамічно визначаємо межі уроків для кожного дня
+        const lessonsThisDay = state.schedule.filter(s => s.day === dayIdx);
+        
+        if (lessonsThisDay.length === 0) return; // Пропускаємо день, якщо він порожній
 
-        for (let slotIdx = startSlot; slotIdx <= 8; slotIdx++) {
-            const isFirst = (slotIdx === startSlot);
+        const slots = lessonsThisDay.map(s => s.slot);
+        
+        // По дефолту беремо 1-7, але розширюємо, якщо є 0 або 8
+        const minSlot = Math.min(...slots, 1); 
+        const maxSlot = Math.max(...slots, 7);
+        
+        const totalRows = maxSlot - minSlot + 1;
+
+        for (let slotIdx = minSlot; slotIdx <= maxSlot; slotIdx++) {
+            const isFirst = (slotIdx === minSlot);
             const isBoundary = (isFirst && dayIdx > 0);
+            
             html += `<tr class="${isBoundary ? 'day-boundary' : ''}">`;
+            
             if (isFirst) {
                 html += `<td rowspan="${totalRows}" class="col-day"><span class="day-text">${dayName}</span></td>`;
             }
+            
             html += `<td class="col-num ${slotIdx === 0 ? 'slot-0' : ''}">${slotIdx}</td>`;
+
             state.teachers.forEach(teacher => {
                 const lesson = state.schedule.find(s => s.day === dayIdx && s.slot === slotIdx && s.teacherId == teacher.id);
                 const s0 = slotIdx === 0 ? 'slot-0' : '';
+                
                 if (lesson) {
                     const clsName = state.classes.find(c => c.id == lesson.classId)?.name || '';
                     const rawCode = typeof getSubjectCode === 'function' ? getSubjectCode(lesson.subject) : lesson.subject;
-                    html += `<td class="${s0}"><div class="lesson-box"><span class="class-name">${clsName}</span><span class="subject-code">${rawCode}</span></div></td>`;
+                    html += `<td class="${s0}">
+                        <div class="lesson-box">
+                            <span class="class-name">${clsName}</span>
+                            <span class="subject-code">${rawCode}</span>
+                        </div>
+                    </td>`;
                 } else {
                     html += `<td class="${s0}"></td>`;
                 }
@@ -778,6 +767,7 @@ function printSchedule() {
             };
         </script>
     </body></html>`;
+    
     printWindow.document.write(html);
     printWindow.document.close();
 }
