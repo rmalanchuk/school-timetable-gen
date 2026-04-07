@@ -17,6 +17,8 @@ let state = {
     activeTab: 'teachers',
     teachers: [],
     classes: [],
+    workload: [], // Додай порожній масив
+    schedule: [], // Додай порожній масив
     config: {
         maxLessons: 8,
         days: ["Понеділок", "Вівторок", "Середа", "Четвер", "П'ятниця"]
@@ -238,88 +240,91 @@ function toggleAvailability(dayIndex, lessonIndex) {
 // --- ГЕНЕРАТОР РОЗКЛАДУ ---
 
 function generateSchedule() {
-    state.schedule = [];
-    let items = (state.workload || []).map(item => ({ ...item }));
-    
-    // Сортуємо: Важкі предмети першими
+    const hasSemesterSplit = (state.workload || []).some(w => w.splitType === 'semester');
+
+    if (hasSemesterSplit) {
+        state.schedule_sem1 = runGenerationAlgorithm(1);
+        state.schedule_sem2 = runGenerationAlgorithm(2);
+        // За замовчуванням після генерації показуємо 1-й семестр
+        state.schedule = state.schedule_sem1; 
+        alert("Згенеровано два варіанти (посеместрово). Показано 1-й семестр.");
+    } else {
+        state.schedule = runGenerationAlgorithm(0);
+    }
+
+    save();
+    renderAll(); // Важливо: спочатку зберегти, потім перемалювати
+}
+
+// Виносимо логіку генерації в окрему функцію, щоб викликати її двічі
+function runGenerationAlgorithm(targetSemester) {
+    let localSchedule = [];
+    let items = (state.workload || []).map(item => {
+        let actualHours = item.hours;
+        
+        // Коригуємо години для посеместрового режиму
+        if (item.splitType === 'semester') {
+            if (targetSemester === 1) {
+                actualHours = (item.semesterPriority === 'first') ? Math.ceil(item.hours) : Math.floor(item.hours);
+            } else if (targetSemester === 2) {
+                actualHours = (item.semesterPriority === 'second') ? Math.ceil(item.hours) : Math.floor(item.hours);
+            }
+        } else {
+            // Для чергування тижнів беремо Math.ceil (напр. 1.5 год -> 2 слоти, один з яких буде маркований Ч/З)
+            actualHours = Math.ceil(item.hours);
+        }
+        
+        return { ...item, actualHours };
+    });
+
     items.sort((a, b) => getPriority(a.subject) - getPriority(b.subject));
 
     items.forEach(item => {
-        const subNameLower = item.subject.toLowerCase().trim();
-        const priority = getPriority(item.subject);
-
-        for (let h = 0; h < item.hours; h++) {
+        for (let h = 0; h < item.actualHours; h++) {
             let bestSlot = null;
-            let minScore = Infinity;
+            let minConflict = Infinity;
 
             for (let d = 0; d < 5; d++) {
-                // Тільки 1-7 уроки. 8-й ігноруємо повністю.
+                // ВАЖЛИВО: s = 1; s <= 7. Нульовий та восьмий ігноруються алгоритмом.
                 for (let s = 1; s <= 7; s++) { 
-                    const teacher = state.teachers.find(t => String(t.id) === String(item.teacherId));
+                    const teacher = state.teachers.find(t => t.id == item.teacherId);
                     
-                    // 1. Перевірка зайнятості (вчитель або клас)
-                    const isOccupied = state.schedule.some(x => 
-                        x.day === d && x.slot === s && 
-                        (String(x.classId) === String(item.classId) || String(x.teacherId) === String(item.teacherId))
-                    );
-                    if (isOccupied) continue;
-
-                    // 2. Ліміт на день (не більше 2-х однакових)
-                    const dailyCount = state.schedule.filter(x => 
-                        x.day === d && String(x.classId) === String(item.classId) && 
-                        x.subject.toLowerCase().trim() === subNameLower
-                    ).length;
-                    if (dailyCount >= 2) continue;
-
-                    // 3. ЖОРСТКА ПЕРЕВІРКА ДОСТУПНОСТІ (з урахуванням індексу s-1)
-                    if (teacher?.availability?.[d]?.[s - 1] === false) continue;
-
-                    // --- SCORE ---
-                    let score = Math.pow(s, 3); // Пріоритет першим урокам
-
-                    // Штраф за спарені уроки (Алгебра + Алгебра підряд)
-                    if (s > 1) {
-                        const prevLesson = state.schedule.find(x => 
-                            x.day === d && x.slot === s - 1 && String(x.classId) === String(item.classId)
-                        );
-                        if (prevLesson && prevLesson.subject.toLowerCase().trim() === subNameLower) {
-                            score += 15000; // Величезний штраф, щоб рознести уроки
-                        }
+                    // 1. Перевірка доступності вчителя (червоні клітинки в модалці)
+                    // Якщо вчитель "зайнятий" (false) — пропускаємо слот
+                    if (teacher && teacher.availability && teacher.availability[d] && teacher.availability[d][s] === false) {
+                        continue; 
                     }
 
-                    // Штрафи за "вікна" та ранні уроки для легких предметів
-                    if (priority === 3 && s === 1) score += 5000;
-                    if (s > 1) {
-                        const hasAbove = state.schedule.some(x => x.day === d && x.slot === s-1 && String(x.classId) === String(item.classId));
-                        if (!hasAbove) score += 4000;
-                    }
+                    // 2. Перевірка накладок (чи не зайнятий вчитель або клас у цей час саме в цьому семестрі)
+                    const teacherBusy = localSchedule.some(sch => sch.day === d && sch.slot === s && sch.teacherId == item.teacherId);
+                    const classBusy = localSchedule.some(sch => sch.day === d && sch.slot === s && sch.classId == item.classId);
 
-                    score += Math.random() * 5;
+                    if (teacherBusy || classBusy) continue;
 
-                    if (score < minScore) {
-                        minScore = score;
+                    // Оцінка слота: чим раніше урок (s), тим він пріоритетніший для заповнення
+                    let score = s; 
+                    if (score < minConflict) {
+                        minConflict = score;
                         bestSlot = { d, s };
                     }
                 }
             }
 
             if (bestSlot) {
-                state.schedule.push({
+                localSchedule.push({
                     id: 'sch_' + Date.now() + Math.random(),
                     teacherId: String(item.teacherId),
                     classId: String(item.classId),
                     subject: item.subject,
                     day: bestSlot.d,
-                    slot: bestSlot.s
+                    slot: bestSlot.s,
+                    // Тут твоя логіка з кружечком
+                    isAlternating: (item.splitType === 'alternating' && h === Math.floor(item.hours)) 
                 });
-            } else {
-                console.error("КРИТИЧНО: Немає місця для", item.subject, "клас", item.classId);
             }
         }
     });
-
-    renderAll(); 
-    save();
+    return localSchedule;
 }
 
 function getPriority(subjectName) {
@@ -455,20 +460,13 @@ function renderWorkload() {
 
 // Функція для обробки натискання кнопки в картці
 function addWorkloadInline(teacherId) {
-    // Примусово робимо ID рядком для пошуку в DOM
     const tIdStr = String(teacherId);
-    
     const classSelect = document.getElementById(`sel-cls-${tIdStr}`);
     const hourInput = document.getElementById(`hrs-${tIdStr}`);
     const subjectInput = document.getElementById(`sub-${tIdStr}`);
 
-    if (!classSelect || !hourInput || !subjectInput) {
-        console.error("Не вдалося знайти поля вводу для вчителя:", tIdStr);
-        return;
-    }
-
     const classId = classSelect.value;
-    const hours = parseInt(hourInput.value);
+    const hours = parseFloat(hourInput.value); // Використовуємо parseFloat для дробових чисел
     const subject = subjectInput.value.trim();
 
     if (!subject || isNaN(hours)) {
@@ -476,20 +474,35 @@ function addWorkloadInline(teacherId) {
         return;
     }
 
-   const newItem = {
+    let splitType = 'none';
+    let semesterPriority = 'none';
+
+    // Якщо години дробові (напр. 1.5 або 0.5)
+    if (hours % 1 !== 0) {
+        const isAlternating = confirm(`Години дробові (${hours}).\n\nОК — Чергування тижнів (Чисельник/Знаменник)\nСкасувати — Розподіл по семестрах`);
+        
+        if (isAlternating) {
+            splitType = 'alternating';
+        } else {
+            splitType = 'semester';
+            semesterPriority = confirm("Більше годин у ПЕРШОМУ семестрі?\n(ОК — Так, Скасувати — Ні, більше у другому)") ? 'first' : 'second';
+        }
+    }
+
+    const newItem = {
         id: String(Date.now()), 
         teacherId: String(tIdStr),
         classId: String(classId),
         subject: subject,
-        hours: hours
+        hours: hours,
+        splitType: splitType,
+        semesterPriority: semesterPriority
     };
 
     if (!state.workload) state.workload = [];
     state.workload.push(newItem);
     
-    // Очищуємо поле предмета після додавання
     subjectInput.value = "";
-    
     renderAll();
     save();
 }
@@ -568,12 +581,15 @@ function renderSchedule() {
     const container = document.getElementById('schedule-output');
     if (!container) return;
 
-    if (!state.schedule) state.schedule = [];
+    // Визначаємо, який масив даних використовувати
+    // Якщо у нас є посеместровий поділ, тут пізніше додамо перемикач, 
+    // а поки беремо основний розклад
+    const currentSchedule = state.schedule || [];
 
     const formatNameForTable = (fullName) => {
         if (!fullName) return "";
         const parts = fullName.trim().split(/\s+/);
-        return parts[0].toUpperCase(); // Тільки прізвище для компактності
+        return parts[0].toUpperCase();
     };
 
     const daysNames = ["Понеділок", "Вівторок", "Середа", "Четвер", "П'ятниця"];
@@ -599,11 +615,14 @@ function renderSchedule() {
             html += `<td class="text-center border-r p-2 ${slotIdx === 0 ? 'text-orange-600 font-bold bg-orange-50/50' : 'text-gray-400'}">${slotIdx}</td>`;
 
             state.teachers.forEach(teacher => {
-                const lesson = state.schedule.find(s => s.day == dayIdx && s.slot == slotIdx && s.teacherId == teacher.id);
+                const lesson = currentSchedule.find(s => s.day == dayIdx && s.slot == slotIdx && s.teacherId == teacher.id);
                 const cls = lesson ? state.classes.find(c => c.id == lesson.classId) : null;
                 
-                // Текст для відображення в режимі редагування
+                // Текст для пустих клітинок (щоб можна було вписати руками)
                 const cellValue = lesson ? `${cls?.name || ''} ${lesson.subject}`.trim() : '';
+
+                // МІТКА КРУЖЕЧКА: якщо урок чергується, додаємо червоне "○"
+                const altMarker = lesson?.isAlternating ? '<span class="text-red-600 ml-1 font-bold">○</span>' : '';
 
                 html += `
                     <td class="p-1 border-r border-gray-100">
@@ -612,7 +631,7 @@ function renderSchedule() {
                              class="min-h-[35px] p-1 rounded text-center outline-none focus:bg-yellow-50 transition-colors">
                             ${lesson ? `
                                 <div class="bg-blue-100 border border-blue-200 rounded py-1 shadow-sm pointer-events-none">
-                                    <span class="block text-blue-900 font-bold leading-none">${cls?.name || ''}</span>
+                                    <span class="block text-blue-900 font-bold leading-none">${cls?.name || ''}${altMarker}</span>
                                     <span class="text-blue-700 text-[9px] lowercase">${lesson.subject}</span>
                                 </div>
                             ` : cellValue}
@@ -744,9 +763,13 @@ function printSchedule() {
                 if (lesson) {
                     const clsName = state.classes.find(c => c.id == lesson.classId)?.name || '';
                     const rawCode = typeof getSubjectCode === 'function' ? getSubjectCode(lesson.subject) : lesson.subject;
+                    
+                    // ДОДАЄМО КРУЖЕЧОК ДЛЯ ДРУКУ
+                    const altMarker = lesson.isAlternating ? ' ○' : '';
+
                     html += `<td class="${s0}">
                         <div class="lesson-box">
-                            <span class="class-name">${clsName}</span>
+                            <span class="class-name">${clsName}${altMarker}</span>
                             <span class="subject-code">${rawCode}</span>
                         </div>
                     </td>`;
