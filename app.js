@@ -380,55 +380,46 @@ function runSingleGeneration() {
             
             // СУВОРИЙ ЛІМІТ: s від 1 до 7. 8-й урок ніколи не буде обраний.
             for (let s = 1; s <= 7; s++) {
+                // 1. АБСОЛЮТНІ КОНФЛІКТИ (якщо виконуються — слот пропускаємо взагалі)
                 
-                // Конфлікт класу (клас уже має урок у цьому слоті)
+                // Конфлікт класу (у класу вже є урок у цей час)
                 if (tempSchedule.some(ls => ls.day === d && ls.slot === s && ls.classId === firstItem.classId)) continue;
-
-                // Конфлікт вчителя (вчитель уже веде інший урок)
+            
+                // Конфлікт вчителя (вчитель вже зайнятий іншим класом)
                 const isTeacherBusy = task.items.some(it => 
                     tempSchedule.some(ls => ls.day === d && ls.slot === s && ls.teacherId === it.teacherId)
                 );
                 if (isTeacherBusy) continue;
-
-                // Заборона на повтор складних предметів (пріоритет 1)
+            
+                // ПЕРЕВІРКА ЧЕРВОНОЇ ЗОНИ (Жорстке "НІ" від вчителя)
+                const hasRedZone = task.items.some(it => getTeacherStatus(it.teacherId, d, s) === 2);
+                if (hasRedZone) continue;
+            
+                // Заборона на повтор предметів (якщо пріоритет високий)
                 const countToday = tempSchedule.filter(ls => ls.day === d && ls.classId === firstItem.classId && ls.subject === firstItem.subject).length;
                 if (countToday > 0) {
                     if (priority === 1) continue; 
                     const isAdjacent = tempSchedule.some(ls => ls.day === d && ls.classId === firstItem.classId && ls.subject === firstItem.subject && Math.abs(ls.slot - s) === 1);
                     if (!isAdjacent) continue;
                 }
-
-                // 1. ПЕРЕВІРКА ЧЕРВОНОЇ ЗОНИ (АБСОЛЮТНЕ ТАБУ)
-                const hasRedZone = task.items.some(it => {
-                    const status = getTeacherStatus(it.teacherId, d, s);
-                    return status === 2; // Якщо хоч один вчитель у парі/чергуванні має червоне - слот бан
-                });
-                if (hasRedZone) continue; // Цей рядок робить червоні зони недоторканними
             
-                // 2. Конфлікт класу та вчителя (залишаємо як було)
-                if (tempSchedule.some(ls => ls.day === d && ls.slot === s && ls.classId === firstItem.classId)) continue;
-                
-                const isTeacherBusy = task.items.some(it => 
-                    tempSchedule.some(ls => ls.day === d && ls.slot === s && ls.teacherId === it.teacherId)
-                );
-                if (isTeacherBusy) continue;
-
-                // РОЗРАХУНОК ШТРАФУ
+                // 2. РОЗРАХУНОК ШТРАФІВ (якщо слот вільний, рахуємо наскільки він "поганий")
                 let penalty = 0;
                 
                 task.items.forEach(it => {
                     const status = getTeacherStatus(it.teacherId, d, s); 
-                    if (status === 2) penalty += 50000; // Червона зона (але не смерть уроку)
-                    if (status === 1) penalty += 1000;  // Жовта зона
+                    if (status === 1) penalty += 1500;  // Штраф за жовту зону (небажано)
                 });
-
-                // Додатковий штраф за пізні уроки (6-й та 7-й), щоб ШІ намагався ставити раніше
+            
+                // Штраф за пізні уроки (щоб розклад був компактним)
                 if (s === 6) penalty += 100;
-                if (s === 7) penalty += 300;
-
+                if (s === 7) penalty += 400;
+            
+                // Додаткові системні штрафи та рандом для варіативності
                 penalty += calculatePenalty(firstItem, d, s, tempSchedule, priority);
-                penalty += Math.random() * 20;
-
+                penalty += Math.random() * 30;
+            
+                // Шукаємо слот з найменшим штрафом
                 if (penalty < minPen) {
                     minPen = penalty;
                     bestSlot = { d, s };
