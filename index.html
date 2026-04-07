@@ -22,6 +22,7 @@
             opacity: 0.8;
             font-weight: normal;
         }
+    
         /* Стиль для порожньої клітинки, готова до вводу */
         [contenteditable="true"]:empty:before {
             content: "+";
@@ -31,18 +32,35 @@
         }
         
         [contenteditable="true"]:focus {
-            background: #fffbeb; /* легкий жовтий при редагуванні */
+            background: #fffbeb; 
             outline: 2px solid #fbbf24;
             border-radius: 4px;
         }
+    
+        /* --- НОВА ЛОГІКА КРУЖЕЧКІВ (ЧЕРГУВАННЯ) --- */
         
-        /* Колір для значка чергування тижнів */
-        .alternating-marker {
-            color: #ef4444;
-            font-weight: bold;
+        .alt-circle {
+            display: inline-block;
             margin-left: 2px;
+            font-weight: bold;
+            font-size: 12px;
+            line-height: 1;
+            vertical-align: middle;
         }
-        /* Вертикальні заголовки для вчителів */
+    
+        /* 1. Синє чергування (різні вчителі) */
+        .marker-external {
+            color: #2563eb; /* blue-600 */
+            text-shadow: 0 0 1px rgba(37, 99, 235, 0.5);
+        }
+    
+        /* 2. Фіолетове чергування (один вчитель - різні предмети) */
+        .marker-internal {
+            color: #9333ea; /* purple-600 */
+            text-shadow: 0 0 1px rgba(147, 51, 234, 0.5);
+        }
+    
+        /* --- ВЕРТИКАЛЬНІ ЗАГОЛОВКИ --- */
         .vertical-th {
             writing-mode: vertical-rl;
             transform: rotate(180deg);
@@ -54,10 +72,16 @@
             font-size: 0.85rem;
         }
         
-        /* Стиль для ініціалів (менший шрифт) */
         .initials {
             font-size: 0.75rem;
             opacity: 0.8;
+        }
+    
+        /* Допоміжний клас для скорочення назв предметів */
+        .truncate {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
         }
     </style>
 </head>
