@@ -312,9 +312,11 @@ function generateSchedule() {
 
 // 2. Логіка однієї конкретної спроби
 function runSingleGeneration() {
-    let tempSchedule = state.schedule.filter(s => s.slot === 0);
+    // 1. БЕРЕМО ВСЕ, ЩО ВЖЕ Є (твої ручні 0, 8 уроки та чергування)
+    let tempSchedule = JSON.parse(JSON.stringify(state.schedule)); 
     let unplaced = [];
     
+    // 2. ПІДГОТОВКА НАВАНТАЖЕННЯ
     const flatWorkload = [];
     state.workload.forEach(item => {
         let h = parseFloat(item.hours);
@@ -328,6 +330,7 @@ function runSingleGeneration() {
     const tasks = [];
     const classesIds = [...new Set(state.classes.map(c => c.id))];
     
+    // ПАЙКА ЧЕРГУВАНЬ (Повертаємо логіку, яку я зачепив)
     classesIds.forEach(cId => {
         let classAlt = flatWorkload.filter(w => w.classId === cId && w.currentHours === 0.5 && w.splitType === 'alternating' && !w.used);
         while (classAlt.length >= 2) {
@@ -342,53 +345,65 @@ function runSingleGeneration() {
         tasks.push({ type: 'single', items: [item], priority: getPriority(item.subject) });
     });
 
-    // СОРТУВАННЯ: Важливі наперед
+    // СОРТУВАННЯ ЗА ПРІОРИТЕТОМ
     tasks.sort((a, b) => {
         if (a.priority !== b.priority) return a.priority - b.priority;
         return Math.random() - 0.5;
     });
 
+    // 3. ЦИКЛ РОЗСТАНОВКИ
     tasks.forEach(task => {
         const firstItem = task.items[0];
         const priority = task.priority;
         let bestSlot = null;
         let minPen = Infinity;
 
-        // Перемішуємо дні
+        // Перемішуємо дні для гнучкості
         const days = [0, 1, 2, 3, 4].sort(() => Math.random() - 0.5);
 
         for (let d of days) {
+            // Тільки основна сітка 1-7
             for (let s = 1; s <= 7; s++) {
-                // 1. ПЕРЕВІРКА КЛАСУ (Залізна заборона)
-                const isClassOccupied = tempSchedule.some(ls => ls.day === d && ls.slot === s && ls.classId === firstItem.classId);
-                if (isClassOccupied) continue;
+                
+                // ЗАБОРОНИ
+                if (tempSchedule.some(ls => ls.day === d && ls.slot === s && ls.classId === firstItem.classId)) continue;
 
-                // 2. ПЕРЕВІРКА ВЧИТЕЛЯ (Залізна заборона)
                 const isTBusy = task.items.some(it => 
                     tempSchedule.some(ls => ls.day === d && ls.slot === s && ls.teacherId === it.teacherId)
                 );
                 if (isTBusy) continue;
 
-                // 3. ЧЕРВОНА ЗОНА (Залізна заборона)
                 const isRed = task.items.some(it => getTeacherStatus(it.teacherId, d, s) === 2);
                 if (isRed) continue;
 
                 let currentPenalty = 0;
 
-                // 4. ДУБЛЮВАННЯ ТА ПАРИ
+                // ЛОГІКА ПАР ТА ДУБЛІВ
                 const countToday = tempSchedule.filter(ls => ls.day === d && ls.classId === firstItem.classId && ls.subject === firstItem.subject).length;
                 
                 if (countToday > 0) {
-                    if (priority === 1) continue; // Математику не дублюємо ніколи
+                    if (priority === 1) continue; 
                     
                     const isAdj = tempSchedule.some(ls => 
                         ls.day === d && ls.classId === firstItem.classId && 
                         ls.subject === firstItem.subject && Math.abs(ls.slot - s) === 1
                     );
-                    if (!isAdj) currentPenalty += 20000; // Штраф за розрив пари
+                    if (!isAdj) currentPenalty += 40000; // Жорсткий штраф за розрив пари
                 }
 
-                // 5. ДОДАТКОВІ ШТРАФИ
+                // МАГНІТ ДЛЯ ВЧИТЕЛЯ (Щільне пакування як у мами)
+                const teacherLessons = tempSchedule.filter(ls => ls.day === d && ls.teacherId === firstItem.teacherId);
+                if (teacherLessons.length > 0) {
+                    const dists = teacherLessons.map(ls => Math.abs(ls.slot - s));
+                    const minDist = Math.min(...dists);
+                    if (minDist === 1) currentPenalty -= 10000; // Бонус за "підряд"
+                    else currentPenalty += (minDist * 3000); // Штраф за вікна
+                } else {
+                    // Якщо перший урок вчителя - тягнемо до ранку
+                    currentPenalty += (s * 1000); 
+                }
+
+                // Викликаємо твою calculatePenalty для врахування складних предметів
                 currentPenalty += calculatePenalty(firstItem, d, s, tempSchedule, priority);
 
                 if (currentPenalty < minPen) {
@@ -408,10 +423,7 @@ function runSingleGeneration() {
             });
         } else {
             const tObj = state.teachers.find(t => t.id === firstItem.teacherId);
-            const tName = tObj ? tObj.name : "Невідомий вчитель";
-            const cObj = state.classes.find(c => c.id === firstItem.classId);
-            const cName = cObj ? cObj.name : "???";
-            unplaced.push(`${firstItem.subject} (${tName}) - ${cName} клас`);
+            unplaced.push(`${firstItem.subject} (${tObj ? tObj.name : '?'}) - ${state.classes.find(c => c.id === firstItem.classId)?.name} кл`);
         }
     });
 
