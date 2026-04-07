@@ -289,32 +289,27 @@ function generateSchedule() {
 
 // 2. Логіка однієї конкретної спроби
 function runSingleGeneration() {
-    // 0. Підготовка: беремо уроки, що вже стоять (0-й та 8-й, якщо вони введені вручну)
     let tempSchedule = state.schedule.filter(s => s.slot === 0 || s.slot === 8);
     let unplaced = [];
     
-    // 1. РОЗБИТТЯ НАВАНТАЖЕННЯ
     const flatWorkload = [];
     state.workload.forEach(item => {
         let h = parseFloat(item.hours);
-        // Цілі години
         while (h >= 1) {
             flatWorkload.push({ ...item, currentHours: 1, used: false });
             h -= 1;
         }
-        // Залишок 0.5 (семестрові або чергування)
         if (h === 0.5) {
             flatWorkload.push({ ...item, currentHours: 0.5, used: false });
         }
     });
 
     const tasks = [];
-
-    // 2. ГРУПУВАННЯ ЧЕРГУВАНЬ (тільки для тих, де splitType === 'alternating')
     const classesIds = [...new Set(state.classes.map(c => c.id))];
     
     classesIds.forEach(cId => {
-        // Фільтруємо "хвости" 0.5 для конкретного класу, які МАЮТЬ чергуватися
+        const cls = state.classes.find(c => c.id === cId);
+        // Вибираємо тільки 0.5, де стоїть тип "alternating"
         let classAltSuffixes = flatWorkload.filter(w => 
             w.classId === cId && 
             w.currentHours === 0.5 && 
@@ -322,7 +317,7 @@ function runSingleGeneration() {
             !w.used
         );
         
-        // --- ЕТАП А: Внутрішнє чергування (один вчитель - різні предмети) ---
+        // --- ЕТАП А: Внутрішнє чергування ---
         const teacherIds = [...new Set(classAltSuffixes.map(s => s.teacherId))];
         teacherIds.forEach(tId => {
             let tSuffixes = classAltSuffixes.filter(s => s.teacherId === tId && !s.used);
@@ -338,7 +333,7 @@ function runSingleGeneration() {
             }
         });
 
-        // --- ЕТАП Б: Зовнішнє чергування (різні вчителі - один клас) ---
+        // --- ЕТАП Б: Зовнішнє чергування ---
         classAltSuffixes = classAltSuffixes.filter(s => !s.used);
         while (classAltSuffixes.length >= 2) {
             const i1 = classAltSuffixes.shift();
@@ -350,36 +345,33 @@ function runSingleGeneration() {
                 priority: Math.min(getPriority(i1.subject), getPriority(i2.subject))
             });
         }
+
+        // --- ТОЧКА КОНТРОЛЮ: Якщо лишився "хвіст" без пари для чергування ---
+        classAltSuffixes.filter(s => !s.used).forEach(item => {
+            item.used = true; 
+            unplaced.push(`⚠️ Немає пари для чергування: ${item.subject} (${cls.name}). Додайте ще 0.5 год іншого предмета.`);
+        });
     });
 
-    // --- ЕТАП В: Одиночні уроки (цілі години + семестрові 0.5 + непарні 0.5) ---
-    // Спершу додаємо семестрові 0.5 та ті 0.5, що не знайшли пару
-    flatWorkload.filter(w => w.currentHours === 0.5 && !w.used).forEach(item => {
+    // Додаємо одиночні уроки (семестрові 0.5 та цілі 1.0)
+    flatWorkload.filter(w => !w.used).forEach(item => {
         item.used = true;
         tasks.push({
             type: 'single',
             items: [item],
             priority: getPriority(item.subject),
-            hours: 0.5
+            hours: item.currentHours
         });
     });
 
-    // Додаємо звичайні уроки (1.0 год)
-    flatWorkload.filter(w => w.currentHours === 1).forEach(item => {
-        item.used = true;
-        tasks.push({
-            type: 'single',
-            items: [item],
-            priority: getPriority(item.subject),
-            hours: 1
-        });
-    });
+    // --- РАНДОМІЗАЦІЯ ТА СОРТУВАННЯ ---
+    // Перемішуємо масив, щоб однакові пріоритети не йшли підряд за списком
+    const shuffledTasks = tasks.sort(() => Math.random() - 0.5);
+    // Сортуємо стабільно за пріоритетом (1 -> 2 -> 3)
+    shuffledTasks.sort((a, b) => a.priority - b.priority);
 
-    // Сортуємо: спочатку складні предмети (Алгебра, Фізика...), щоб вони зайняли кращі слоти
-    tasks.sort((a, b) => a.priority - b.priority);
-
-    // 3. РОЗСТАНОВКА В РОЗКЛАД
-    tasks.forEach(task => {
+    // 3. РОЗСТАНОВКА
+    shuffledTasks.forEach(task => {
         const cls = state.classes.find(c => c.id === task.items[0].classId);
         const className = cls ? cls.name : "Клас";
 
@@ -388,7 +380,11 @@ function runSingleGeneration() {
             let bestSlot = null;
             let minPen = Infinity;
 
-            for (let d = 0; d < 5; d++) {
+            // Шукаємо випадковий старт для днів, щоб не було перекосу на Понеділок
+            const dayOffset = Math.floor(Math.random() * 5);
+
+            for (let d_raw = 0; d_raw < 5; d_raw++) {
+                let d = (d_raw + dayOffset) % 5; 
                 for (let s = 1; s <= 7; s++) {
                     const t1Busy = tempSchedule.some(ls => ls.day === d && ls.slot === s && ls.teacherId === t1.teacherId);
                     const t2Busy = tempSchedule.some(ls => ls.day === d && ls.slot === s && ls.teacherId === t2.teacherId);
@@ -399,39 +395,37 @@ function runSingleGeneration() {
                     let penalty = calculatePenalty(t1, d, s, tempSchedule, task.priority) + 
                                   calculatePenalty(t2, d, s, tempSchedule, task.priority);
                     
+                    // Додаємо дрібку рандому до штрафу, щоб урізноманітнити вибір при однакових умовах
+                    penalty += Math.random() * 5;
+
                     if (penalty < minPen) { minPen = penalty; bestSlot = { d, s }; }
                 }
             }
 
             if (bestSlot) {
-                // Обидва предмети в один слот з міткою чергування
-                tempSchedule.push({ 
-                    teacherId: t1.teacherId, classId: t1.classId, subject: t1.subject, 
-                    day: bestSlot.d, slot: bestSlot.s, isAlternating: true 
-                });
-                tempSchedule.push({ 
-                    teacherId: t2.teacherId, classId: t2.classId, subject: t2.subject, 
-                    day: bestSlot.d, slot: bestSlot.s, isAlternating: true 
-                });
+                tempSchedule.push({ teacherId: t1.teacherId, classId: t1.classId, subject: t1.subject, day: bestSlot.d, slot: bestSlot.s, isAlternating: true });
+                tempSchedule.push({ teacherId: t2.teacherId, classId: t2.classId, subject: t2.subject, day: bestSlot.d, slot: bestSlot.s, isAlternating: true });
             } else {
-                unplaced.push(`Чергування: ${t1.subject}/${t2.subject} - ${className}`);
+                unplaced.push(`Не влізло чергування: ${t1.subject}/${t2.subject} (${className})`);
             }
         } else {
             const item = task.items[0];
             let bestSlot = null;
             let minPen = Infinity;
+            const dayOffset = Math.floor(Math.random() * 5);
 
-            for (let d = 0; d < 5; d++) {
+            for (let d_raw = 0; d_raw < 5; d_raw++) {
+                let d = (d_raw + dayOffset) % 5;
                 for (let s = 1; s <= 7; s++) {
                     const tBusy = tempSchedule.some(ls => ls.day === d && ls.slot === s && ls.teacherId === item.teacherId);
                     const cBusy = tempSchedule.some(ls => ls.day === d && ls.slot === s && ls.classId === item.classId);
-                    
                     if (tBusy || cBusy) continue;
                     
-                    // Обмеження: не більше одного такого предмета в день для класу
                     if (tempSchedule.some(ls => ls.day === d && ls.classId === item.classId && ls.subject === item.subject)) continue;
 
                     let penalty = calculatePenalty(item, d, s, tempSchedule, task.priority);
+                    penalty += Math.random() * 5;
+                    
                     if (penalty < minPen) { minPen = penalty; bestSlot = { d, s }; }
                 }
             }
@@ -440,7 +434,6 @@ function runSingleGeneration() {
                 tempSchedule.push({ 
                     teacherId: item.teacherId, classId: item.classId, subject: item.subject, 
                     day: bestSlot.d, slot: bestSlot.s, 
-                    // МІТКА: тільки якщо це 0.5 ТА тип "alternating"
                     isAlternating: (item.currentHours === 0.5 && item.splitType === 'alternating')
                 });
             } else {
