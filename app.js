@@ -638,17 +638,14 @@ function printSchedule() {
     const daysNames = ["ПОНЕДІЛОК", "ВІВТОРОК", "СЕРЕДА", "ЧЕТВЕР", "П'ЯТНИЦЯ"];
     const dateStr = new Date().toLocaleDateString('uk-UA');
 
-    // РОЗРАХУНОК ГЕОМЕТРІЇ (в мм для А4, жорстко зафіксовано)
-    const totalWidth = 200; // Робоча ширина листу (210мм А4 - поля)
-    const sideColsWidth = 20; // ДН + №
+    const totalWidth = 200; 
+    const sideColsWidth = 20; 
     const teachersCount = state.teachers.length;
-    // Динамічна ширина колонки вчителя (математично точна)
     const colWidth = (totalWidth - sideColsWidth) / teachersCount; 
 
     const formatName = (fullName) => {
         if (!fullName) return "";
         const parts = fullName.trim().split(/\s+/);
-        // Компактно: Прізвище + І.І.
         return parts[0] + (parts[1] ? ` ${parts[1][0]}.` : "") + (parts[2] ? `${parts[2][0]}.` : "");
     };
 
@@ -656,16 +653,12 @@ function printSchedule() {
         <html>
         <head>
             <style>
-                @page { 
-                    size: A4 portrait; 
-                    margin: 5mm; 
-                }
+                @page { size: A4 portrait; margin: 5mm; }
                 body { 
                     margin: 0; 
                     padding: 0; 
                     font-family: "Arial Narrow", Arial, sans-serif; 
                     -webkit-print-color-adjust: exact;
-                    color: black;
                 }
                 
                 .page-wrapper {
@@ -673,34 +666,30 @@ function printSchedule() {
                     margin: 0 auto;
                     display: flex;
                     flex-direction: column;
-                    height: 287mm; /* Висота А4 мінус поля */
+                    height: 285mm; /* Обмеження висоти для 1 сторінки */
                 }
 
                 table { 
-                    width: 200mm; 
+                    width: 100%; 
                     border-collapse: collapse; 
-                    table-layout: fixed; /* ЗАБОРОНА БРАУЗЕРУ ЗМІНЮВАТИ ШИРИНУ */
-                    
-                    /* ФІКС МЕЖІ СПРАВА: Використовуємо outline замість border */
-                    outline: 0.5mm solid black; 
-                    border: none;
+                    table-layout: fixed;
+                    /* ФІКС ПРАВОЇ МЕЖІ: Тінь імітує бордер, який не зникає */
+                    box-shadow: 0 0 0 0.5mm black; 
+                    margin: 0.5mm; 
                 }
                 
-                /* СТАНДАРТНІ ЛІНІЇ */
                 th, td { 
                     border: 0.1mm solid black; 
                     text-align: center; 
                     padding: 0;
-                    height: 4.8mm; /* Трохи зменшив висоту рядка, щоб звільнити місце снизу */
+                    height: 4.2mm; /* Ще трохи зменшив висоту для місця знизу */
                     overflow: hidden;
                     font-size: 8pt;
                 }
 
-                /* ЖИРНІ ЛІНІЇ (Хедер та роздільники днів) */
-                thead th { border-bottom: 0.6mm solid black !important; }
-                .day-boundary td { border-top: 0.6mm solid black !important; }
+                thead th { border-bottom: 0.7mm solid black !important; }
+                .day-boundary td { border-top: 0.7mm solid black !important; }
 
-                /* КОЛОНКИ */
                 .col-day { width: 12mm; font-weight: bold; font-size: 7pt; }
                 .col-num { width: 8mm; background-color: #f0f0f0 !important; font-weight: bold; }
                 .col-teacher { width: ${colWidth}mm; }
@@ -712,7 +701,7 @@ function printSchedule() {
                 }
 
                 .teacher-name-cell {
-                    height: 30mm; /* Трохи зменшив висоту шапки */
+                    height: 28mm; /* Компактна шапка */
                     writing-mode: vertical-lr;
                     transform: rotate(180deg);
                     font-weight: bold;
@@ -722,26 +711,21 @@ function printSchedule() {
                 }
 
                 .lesson-box { line-height: 1; }
-                .class-name { font-weight: bold; font-size: 9pt; display: block; }
-                
-                /* ПОВЕРНУВ СКОРОЧЕННЯ ПРЕДМЕТІВ */
-                .subject-code { font-size: 6pt; display: block; text-transform: lowercase; }
+                .class-name { font-weight: bold; font-size: 8.5pt; display: block; }
+                .subject-code { font-size: 6pt; display: block; }
                 
                 .slot-0 { background-color: #fff9e6 !important; }
                 
-                h2 { text-align: center; font-size: 12pt; margin: 2mm 0; }
+                h2 { text-align: center; font-size: 11pt; margin: 1mm 0; }
 
-                /* БЛОК НОТАТОК (займає залишок місця знизу) */
-                .notes-section {
-                    margin-top: 5mm;
-                    border-top: 1px dashed #666;
-                    padding-top: 2mm;
-                    color: #444;
-                    font-size: 9pt;
-                    flex-grow: 1; /* Гнучко розширюється */
+                /* ЗОНА ДЛЯ НОТАТОК (Чиста) */
+                .notes-empty {
+                    margin-top: 10mm;
+                    padding-left: 2mm;
+                    color: #000;
+                    font-size: 10pt;
+                    flex-grow: 1;
                 }
-                .notes-title { font-weight: bold; margin-bottom: 3mm; }
-                .notes-line { border-bottom: 0.1mm solid #ccc; height: 6mm; width: 100%; }
             </style>
         </head>
         <body>
@@ -764,32 +748,20 @@ function printSchedule() {
         const totalRows = 9 - startSlot;
 
         for (let slotIdx = startSlot; slotIdx <= 8; slotIdx++) {
-            const isFirstRow = (slotIdx === startSlot);
-            const isBoundary = (isFirstRow && dayIdx > 0);
-            
+            const isFirst = (slotIdx === startSlot);
+            const isBoundary = (isFirst && dayIdx > 0);
             html += `<tr class="${isBoundary ? 'day-boundary' : ''}">`;
-            
-            if (isFirstRow) {
+            if (isFirst) {
                 html += `<td rowspan="${totalRows}" class="col-day"><span class="day-text">${dayName}</span></td>`;
             }
-            
             html += `<td class="col-num ${slotIdx === 0 ? 'slot-0' : ''}">${slotIdx}</td>`;
-
             state.teachers.forEach(teacher => {
                 const lesson = state.schedule.find(s => s.day === dayIdx && s.slot === slotIdx && s.teacherId == teacher.id);
                 const s0 = slotIdx === 0 ? 'slot-0' : '';
-                
                 if (lesson) {
                     const clsName = state.classes.find(c => c.id == lesson.classId)?.name || '';
-                    // ВИКОРИСТОВУЄМО КОД ПРЕДМЕТУ (getSubjectCode), А НЕ ПОВНУ НАЗВУ
                     const rawCode = typeof getSubjectCode === 'function' ? getSubjectCode(lesson.subject) : lesson.subject;
-
-                    html += `<td class="${s0}">
-                        <div class="lesson-box">
-                            <span class="class-name">${clsName}</span>
-                            <span class="subject-code">${rawCode}</span>
-                        </div>
-                    </td>`;
+                    html += `<td class="${s0}"><div class="lesson-box"><span class="class-name">${clsName}</span><span class="subject-code">${rawCode}</span></div></td>`;
                 } else {
                     html += `<td class="${s0}"></td>`;
                 }
@@ -799,13 +771,8 @@ function printSchedule() {
     });
 
     html += `</tbody></table>
-            <div class="notes-section">
-                <div class="notes-title">Нотатки:</div>
-                <div class="notes-line"></div>
-                <div class="notes-line"></div>
-                <div class="notes-line"></div>
-                <div class="notes-line"></div>
-                <div class="notes-line"></div>
+            <div class="notes-empty">
+                <strong>Нотатки:</strong>
             </div>
         </div>
         <script>
@@ -814,7 +781,6 @@ function printSchedule() {
             };
         </script>
     </body></html>`;
-    
     printWindow.document.write(html);
     printWindow.document.close();
 }
