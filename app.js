@@ -32,42 +32,51 @@ function init() {
         const saved = localStorage.getItem('school_schedule_data');
         if (saved) {
             const parsed = JSON.parse(saved);
-            // Мінімальна перевірка, що дані валідні
+            
             if (parsed && typeof parsed === 'object') {
-                state = parsed;
+                // Використовуємо деструктуризацію, щоб зберегти структуру state, 
+                // навіть якщо в збережених даних чогось не вистачає
+                state = {
+                    ...state, // початкові значення (пусті масиви)
+                    ...parsed  // те, що завантажили з пам'яті
+                };
+                
+                // Перевіряємо, чи є в завантажених даних масив розкладу
+                if (!state.schedule) state.schedule = [];
+                
                 console.log("Дані успішно завантажено");
             }
         }
     } catch (e) {
         console.error("Помилка при читанні з localStorage:", e);
-        // Якщо дані биті, ми їх не перетираємо одразу, 
-        // щоб ти міг спробувати витягнути їх через консоль
     }
+    
+    // ВАЖЛИВО: Оновлюємо інтерфейс після завантаження
     renderAll();
 }
 
-function save() {
+function saveData() {
+    // Зберігаємо весь об'єкт state (там і вчителі, і класи, і розклад)
     localStorage.setItem('school_schedule_data', JSON.stringify(state));
+    console.log("Дані збережено!"); 
 }
 
-// --- Навігація ---
+// --- Навігація (тут теж міняємо виклик) ---
 
 function showTab(tabName) {
     state.activeTab = tabName;
     
-    // Ховаємо весь контент
     document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
-    // Показуємо потрібний
     const activeSection = document.getElementById(`tab-${tabName}`);
     if (activeSection) activeSection.classList.add('active');
     
-    // Оновлюємо стилі кнопок
     document.querySelectorAll('.nav-btn').forEach(btn => {
         btn.classList.remove('active');
         if (btn.id === `btn-${tabName}`) btn.classList.add('active');
     });
     
-    save();
+    // Викликаємо оновлену назву
+    saveData(); 
     renderAll();
 }
 
