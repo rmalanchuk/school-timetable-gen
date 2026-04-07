@@ -671,7 +671,8 @@ function printSchedule() {
                     border: 0.1mm solid black; 
                     text-align: center; 
                     padding: 0;
-                    height: 3.8mm; 
+                    /* ЗБІЛЬШЕНО ВИСОТУ: тепер текст не тисне на межі */
+                    height: 4.5mm; 
                     overflow: hidden;
                     font-size: 8pt;
                     box-sizing: border-box;
@@ -689,12 +690,18 @@ function printSchedule() {
                     font-weight: bold; font-size: 8.5pt;
                     text-align: left; padding: 1mm 0;
                 }
-                .lesson-box { line-height: 0.9; }
-                .class-name { font-weight: bold; font-size: 8pt; display: block; }
-                .subject-code { font-size: 5.5pt; display: block; }
+                .lesson-box { 
+                    line-height: 1.1; /* Трохи вільніший інтервал */
+                    display: flex;
+                    flex-direction: column;
+                    justify-content: center;
+                    height: 100%;
+                }
+                .class-name { font-weight: bold; font-size: 8.5pt; display: block; }
+                .subject-code { font-size: 6pt; display: block; }
                 .slot-0 { background-color: #fff9e6 !important; }
                 h2 { text-align: center; font-size: 11pt; margin: 1mm 0; }
-                .notes-area { margin-top: 3mm; padding-left: 2mm; font-weight: bold; font-size: 10pt; }
+                .notes-area { margin-top: 4mm; padding-left: 2mm; font-weight: bold; font-size: 10pt; }
             </style>
         </head>
         <body>
@@ -712,17 +719,12 @@ function printSchedule() {
     `;
 
     daysNames.forEach((dayName, dayIdx) => {
-        // Динамічно визначаємо межі уроків для кожного дня
         const lessonsThisDay = state.schedule.filter(s => s.day === dayIdx);
-        
-        if (lessonsThisDay.length === 0) return; // Пропускаємо день, якщо він порожній
+        if (lessonsThisDay.length === 0) return;
 
         const slots = lessonsThisDay.map(s => s.slot);
-        
-        // По дефолту беремо 1-7, але розширюємо, якщо є 0 або 8
         const minSlot = Math.min(...slots, 1); 
         const maxSlot = Math.max(...slots, 7);
-        
         const totalRows = maxSlot - minSlot + 1;
 
         for (let slotIdx = minSlot; slotIdx <= maxSlot; slotIdx++) {
@@ -730,11 +732,9 @@ function printSchedule() {
             const isBoundary = (isFirst && dayIdx > 0);
             
             html += `<tr class="${isBoundary ? 'day-boundary' : ''}">`;
-            
             if (isFirst) {
                 html += `<td rowspan="${totalRows}" class="col-day"><span class="day-text">${dayName}</span></td>`;
             }
-            
             html += `<td class="col-num ${slotIdx === 0 ? 'slot-0' : ''}">${slotIdx}</td>`;
 
             state.teachers.forEach(teacher => {
