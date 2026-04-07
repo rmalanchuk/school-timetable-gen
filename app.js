@@ -240,91 +240,110 @@ function toggleAvailability(dayIndex, lessonIndex) {
 // --- ГЕНЕРАТОР РОЗКЛАДУ ---
 
 function generateSchedule() {
-    const hasSemesterSplit = (state.workload || []).some(w => w.splitType === 'semester');
+    // 1. Підготовка: очищуємо старий розклад (крім ручних правок на 0 та 8 уроках)
+    // Якщо хочете повне перетирання, залиште просто state.schedule = [];
+    state.schedule = state.schedule.filter(s => s.slot === 0 || s.slot === 8);
 
-    if (hasSemesterSplit) {
-        state.schedule_sem1 = runGenerationAlgorithm(1);
-        state.schedule_sem2 = runGenerationAlgorithm(2);
-        // За замовчуванням після генерації показуємо 1-й семестр
-        state.schedule = state.schedule_sem1; 
-        alert("Згенеровано два варіанти (посеместрово). Показано 1-й семестр.");
-    } else {
-        state.schedule = runGenerationAlgorithm(0);
-    }
+    const workload = [...state.workload];
+    const unplacedLessons = [];
 
-    save();
-    renderAll(); // Важливо: спочатку зберегти, потім перемалювати
-}
+    // Перемішуємо навантаження, щоб кожен раз розклад був трохи іншим
+    workload.sort(() => Math.random() - 0.5);
 
-// Виносимо логіку генерації в окрему функцію, щоб викликати її двічі
-function runGenerationAlgorithm(targetSemester) {
-    let localSchedule = [];
-    let items = (state.workload || []).map(item => {
-        let actualHours = item.hours;
+    workload.forEach(item => {
+        const teacher = state.teachers.find(t => t.id === item.teacherId);
+        const cls = state.classes.find(c => c.id === item.classId);
+        if (!teacher || !cls) return;
+
+        let hoursToPlace = parseFloat(item.hours);
         
-        // Коригуємо години для посеместрового режиму
-        if (item.splitType === 'semester') {
-            if (targetSemester === 1) {
-                actualHours = (item.semesterPriority === 'first') ? Math.ceil(item.hours) : Math.floor(item.hours);
-            } else if (targetSemester === 2) {
-                actualHours = (item.semesterPriority === 'second') ? Math.ceil(item.hours) : Math.floor(item.hours);
-            }
-        } else {
-            // Для чергування тижнів беремо Math.ceil (напр. 1.5 год -> 2 слоти, один з яких буде маркований Ч/З)
-            actualHours = Math.ceil(item.hours);
-        }
-        
-        return { ...item, actualHours };
-    });
-
-    items.sort((a, b) => getPriority(a.subject) - getPriority(b.subject));
-
-    items.forEach(item => {
-        for (let h = 0; h < item.actualHours; h++) {
+        while (hoursToPlace > 0) {
             let bestSlot = null;
-            let minConflict = Infinity;
+            let minPenalty = Infinity;
 
+            // Перебираємо робочі дні (0-4) та робочі слоти (1-7)
             for (let d = 0; d < 5; d++) {
-                // ВАЖЛИВО: s = 1; s <= 7. Нульовий та восьмий ігноруються алгоритмом.
-                for (let s = 1; s <= 7; s++) { 
-                    const teacher = state.teachers.find(t => t.id == item.teacherId);
+                for (let s = 1; s <= 7; s++) {
                     
-                    // 1. Перевірка доступності вчителя (червоні клітинки в модалці)
-                    // Якщо вчитель "зайнятий" (false) — пропускаємо слот
-                    if (teacher && teacher.availability && teacher.availability[d] && teacher.availability[d][s] === false) {
-                        continue; 
-                    }
-
-                    // 2. Перевірка накладок (чи не зайнятий вчитель або клас у цей час саме в цьому семестрі)
-                    const teacherBusy = localSchedule.some(sch => sch.day === d && sch.slot === s && sch.teacherId == item.teacherId);
-                    const classBusy = localSchedule.some(sch => sch.day === d && sch.slot === s && sch.classId == item.classId);
-
+                    // КРИТИЧНІ ОБМЕЖЕННЯ (Hard Constraints)
+                    // Вчитель зайнятий або Клас зайнятий
+                    const teacherBusy = state.schedule.some(ls => ls.day === d && ls.slot === s && ls.teacherId === teacher.id);
+                    const classBusy = state.schedule.some(ls => ls.day === d && ls.slot === s && ls.classId === cls.id);
+                    
                     if (teacherBusy || classBusy) continue;
 
-                    // Оцінка слота: чим раніше урок (s), тим він пріоритетніший для заповнення
-                    let score = s; 
-                    if (score < minConflict) {
-                        minConflict = score;
-                        bestSlot = { d, s };
+                    // ПРЕДМЕТНА ЛОГІКА: не більше одного такого ж предмета в одному класі на день
+                    const subjectInClassToday = state.schedule.some(ls => ls.day === d && ls.classId === cls.id && ls.subject === item.subject);
+                    if (subjectInClassToday) continue;
+
+                    // ОБЧИСЛЕННЯ ШТРАФІВ (Soft Constraints)
+                    let penalty = 0;
+
+                    // 1. Побажання вчителя (з модалки)
+                    if (teacher.availability && teacher.availability[d] && teacher.availability[d][s] === false) {
+                        penalty += 1000; // Дуже небажано, але можливо
                     }
+
+                    // 2. Граничне навантаження вчителя на день (бажано не більше 5-6)
+                    const lessonsToday = state.schedule.filter(ls => ls.day === d && ls.teacherId === teacher.id).length;
+                    if (lessonsToday >= 6) penalty += 50;
+                    if (lessonsToday >= 7) penalty += 200;
+
+                    // 3. "Вікна" (кватирки) для вчителя
+                    // Перевіряємо, чи цей слот стоїть окремо від інших уроків вчителя
+                    const hasNeighbor = state.schedule.some(ls => ls.day === d && ls.teacherId === teacher.id && Math.abs(ls.slot - s) === 1);
+                    if (!hasNeighbor && lessonsToday > 0) {
+                        penalty += 30; // Штраф за потенційне вікно
+                    }
+
+                    if (penalty < minPenalty) {
+                        minPenalty = penalty;
+                        bestSlot = { day: d, slot: s };
+                    }
+                    
+                    if (minPenalty === 0) break; // Знайшли ідеальне місце, далі не шукаємо
                 }
             }
 
             if (bestSlot) {
-                localSchedule.push({
-                    id: 'sch_' + Date.now() + Math.random(),
-                    teacherId: String(item.teacherId),
-                    classId: String(item.classId),
+                state.schedule.push({
+                    teacherId: teacher.id,
+                    classId: cls.id,
                     subject: item.subject,
-                    day: bestSlot.d,
-                    slot: bestSlot.s,
-                    // Тут твоя логіка з кружечком
-                    isAlternating: (item.splitType === 'alternating' && h === Math.floor(item.hours)) 
+                    day: bestSlot.day,
+                    slot: bestSlot.slot,
+                    isAlternating: hoursToPlace === 0.5 // якщо залишилось півгодини
                 });
+                hoursToPlace -= (hoursToPlace >= 1 ? 1 : 0.5);
+            } else {
+                // Якщо не знайшли жодного місця навіть зі штрафами
+                unplacedLessons.push(`${teacher.name} -> ${cls.name} (${item.subject})`);
+                break; 
             }
         }
     });
-    return localSchedule;
+
+    saveData();
+    renderSchedule();
+    showGenerationReport(unplacedLessons);
+}
+
+function showGenerationReport(errors) {
+    const output = document.getElementById('schedule-output');
+    if (errors.length > 0) {
+        const reportHtml = `
+            <div class="mt-4 p-4 bg-red-50 border-l-4 border-red-500 text-red-700">
+                <h3 class="font-bold mb-2">⚠️ Не вдалося розмістити ${errors.length} предметів:</h3>
+                <ul class="list-disc list-inside text-xs">
+                    ${errors.map(e => `<li>${e}</li>`).join('')}
+                </ul>
+                <p class="mt-2 text-[10px] italic">Спробуйте додати 0-й або 8-й уроки вручну або перевірте накладки в побажаннях вчителів.</p>
+            </div>
+        `;
+        output.insertAdjacentHTML('afterbegin', reportHtml);
+    } else {
+        alert("✅ Розклад згенеровано успішно! Всі уроки на місцях.");
+    }
 }
 
 function getPriority(subjectName) {
