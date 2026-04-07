@@ -275,8 +275,8 @@ function toggleAvailability(dayIndex, lessonIndex) {
 // 1. Головна функція керування спробами
 function generateSchedule() {
     const startTime = Date.now();
-    const maxDuration = 25000; // 25 секунд
-    const maxAttempts = 500;
+    const maxDuration = 20000; // 20 секунд
+    const maxAttempts = 400;
     
     let bestAttempt = {
         schedule: [],
@@ -285,7 +285,7 @@ function generateSchedule() {
     };
 
     let attempt = 0;
-    console.log("🚀 Запуск інтелектуальної генерації (спроба знайти ідеал)...");
+    console.log("🚀 Генерація розпочата...");
 
     while (attempt < maxAttempts && (Date.now() - startTime) < maxDuration) {
         attempt++;
@@ -297,9 +297,9 @@ function generateSchedule() {
                 unplacedCount: result.unplaced.length,
                 unplacedList: result.unplaced
             };
+            // Якщо знайшли ідеал — виходимо зразу
+            if (bestAttempt.unplacedCount === 0) break;
         }
-
-        if (bestAttempt.unplacedCount === 0) break;
     }
 
     state.schedule = bestAttempt.schedule;
@@ -312,7 +312,7 @@ function generateSchedule() {
 
 // 2. Логіка однієї конкретної спроби
 function runSingleGeneration() {
-    // 0. Беремо ТІЛЬКИ 0-й урок (якщо він є). 8-й ігноруємо повністю, ніби його не існує.
+    // 0. Беремо ТІЛЬКИ 0-й урок (якщо він є). 
     let tempSchedule = state.schedule.filter(s => s.slot === 0);
     let unplaced = [];
     
@@ -330,11 +330,11 @@ function runSingleGeneration() {
     const tasks = [];
     const classesIds = [...new Set(state.classes.map(c => c.id))];
     
-    // 2. ГРУПУВАННЯ ЧЕРГУВАНЬ (без змін)
+    // 2. ГРУПУВАННЯ ЧЕРГУВАНЬ
     classesIds.forEach(cId => {
         let classAltSuffixes = flatWorkload.filter(w => w.classId === cId && w.currentHours === 0.5 && w.splitType === 'alternating' && !w.used);
-        
         const teacherIds = [...new Set(classAltSuffixes.map(s => s.teacherId))];
+        
         teacherIds.forEach(tId => {
             let tSuffixes = classAltSuffixes.filter(s => s.teacherId === tId && !s.used);
             while (tSuffixes.length >= 2) {
@@ -362,66 +362,60 @@ function runSingleGeneration() {
         tasks.push({ type: 'single', items: [item], priority: getPriority(item.subject) });
     });
 
-    // Сортування (складні вперед + рандом)
-    tasks.sort(() => Math.random() - 0.5);
-    tasks.sort((a, b) => a.priority - b.priority);
+    // --- СОРТУВАННЯ ЗА ПРІОРИТЕТОМ (Важливо!) ---
+    tasks.sort((a, b) => {
+        if (a.priority !== b.priority) return a.priority - b.priority;
+        return Math.random() - 0.5;
+    });
 
-    // 3. ЦИКЛ РОЗСТАНОВКИ (ОБМЕЖЕНИЙ 7 УРОКАМИ)
+    // 3. ЦИКЛ РОЗСТАНОВКИ
     tasks.forEach(task => {
         const firstItem = task.items[0];
         const priority = task.priority;
         let bestSlot = null;
         let minPen = Infinity;
 
+        // Рандомний старт дня для рівномірності
         const dayOffset = Math.floor(Math.random() * 5);
 
         for (let d_raw = 0; d_raw < 5; d_raw++) {
             let d = (d_raw + dayOffset) % 5;
             
-            // СУВОРИЙ ЛІМІТ: s від 1 до 7. 8-й урок ніколи не буде обраний.
             for (let s = 1; s <= 7; s++) {
-                // 1. АБСОЛЮТНІ КОНФЛІКТИ (якщо виконуються — слот пропускаємо взагалі)
-                
-                // Конфлікт класу (у класу вже є урок у цей час)
+                // АБСОЛЮТНІ ЗАБОРОНИ
                 if (tempSchedule.some(ls => ls.day === d && ls.slot === s && ls.classId === firstItem.classId)) continue;
-            
-                // Конфлікт вчителя (вчитель вже зайнятий іншим класом)
+
                 const isTeacherBusy = task.items.some(it => 
                     tempSchedule.some(ls => ls.day === d && ls.slot === s && ls.teacherId === it.teacherId)
                 );
                 if (isTeacherBusy) continue;
-            
-                // ПЕРЕВІРКА ЧЕРВОНОЇ ЗОНИ (Жорстке "НІ" від вчителя)
+
                 const hasRedZone = task.items.some(it => getTeacherStatus(it.teacherId, d, s) === 2);
                 if (hasRedZone) continue;
-            
-                // Заборона на повтор предметів (якщо пріоритет високий)
+
+                // ЛОГІКА ПОВТОРІВ ПРЕДМЕТА
                 const countToday = tempSchedule.filter(ls => ls.day === d && ls.classId === firstItem.classId && ls.subject === firstItem.subject).length;
-                if (countToday > 0) {
-                    if (priority === 1) continue; 
-                    const isAdjacent = tempSchedule.some(ls => ls.day === d && ls.classId === firstItem.classId && ls.subject === firstItem.subject && Math.abs(ls.slot - s) === 1);
-                    if (!isAdjacent) continue;
-                }
-            
-                // 2. РОЗРАХУНОК ШТРАФІВ (якщо слот вільний, рахуємо наскільки він "поганий")
-                let penalty = 0;
                 
-                task.items.forEach(it => {
-                    const status = getTeacherStatus(it.teacherId, d, s); 
-                    if (status === 1) penalty += 1500;  // Штраф за жовту зону (небажано)
-                });
-            
-                // Штраф за пізні уроки (щоб розклад був компактним)
-                if (s === 6) penalty += 100;
-                if (s === 7) penalty += 400;
-            
-                // Додаткові системні штрафи та рандом для варіативності
-                penalty += calculatePenalty(firstItem, d, s, tempSchedule, priority);
-                penalty += Math.random() * 30;
-            
-                // Шукаємо слот з найменшим штрафом
-                if (penalty < minPen) {
-                    minPen = penalty;
+                let currentSlotPenalty = 0;
+
+                if (countToday > 0) {
+                    if (priority === 1) continue; // Заборона 2-ї математики
+                    
+                    const isAdjacent = tempSchedule.some(ls => 
+                        ls.day === d && ls.classId === firstItem.classId && 
+                        ls.subject === firstItem.subject && Math.abs(ls.slot - s) === 1
+                    );
+                    
+                    if (!isAdjacent) {
+                        currentSlotPenalty += 25000; // Величезний штраф за розрив пари, але не смерть
+                    }
+                }
+
+                // Додаємо загальні штрафи (твою оновлену calculatePenalty)
+                currentSlotPenalty += calculatePenalty(firstItem, d, s, tempSchedule, priority);
+
+                if (currentSlotPenalty < minPen) {
+                    minPen = currentSlotPenalty;
                     bestSlot = { d, s };
                 }
             }
@@ -447,20 +441,29 @@ function runSingleGeneration() {
 // 3. Універсальний калькулятор штрафів
 function calculatePenalty(item, d, s, tempSchedule, priority) {
     const status = getTeacherStatus(item.teacherId, d, s);
-
-    if (status === 2) return 1000000; // Для надійності повертаємо космос
+    if (status === 2) return 1000000; 
 
     let p = 0;
-    // Жовта зона (1) - додаємо відчутний штраф
+
+    // Штраф за жовту зону (бажано вікно)
     if (status === 1) p += 5000; 
 
-    // Штраф за вікна та навантаження
-    const tLessonsToday = tempSchedule.filter(ls => ls.day === d && ls.teacherId === item.teacherId).length;
-    if (tLessonsToday >= 6) p += 500;
+    // Логіка пізніх уроків
+    if (priority === 1 || priority === 2) {
+        // Складні предмети дуже не хочемо на кінець дня
+        if (s === 6) p += 1500;
+        if (s === 7) p += 4000;
+    } else {
+        // Для пріоритету 3 (спорт, мистецтво) штрафу немає, 
+        // навпаки — трохи заохочуємо їх падати вниз, щоб звільнити ранок
+        if (s >= 6) p -= 200; 
+    }
+
+    // Рандом мінімальний (лише 5 одиниць), щоб не перебивати логіку пріоритетів
+    p += Math.random() * 5;
 
     return p;
 }
-
 // Додай цю допоміжну функцію, якщо її немає
 function getTeacherStatus(teacherId, day, slot) {
     const teacher = state.teachers.find(t => t.id === teacherId);
