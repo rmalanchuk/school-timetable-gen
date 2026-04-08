@@ -294,6 +294,7 @@ async function generateSchedule() {
     let bestAttempt = {
         schedule: [],
         unplacedCount: Infinity,
+        totalPenalty: Infinity,
         unplacedList: [],
         unpairedAlternating: [],
         overflowTasks: []
@@ -313,11 +314,18 @@ async function generateSchedule() {
         }
 
         const result = runSingleGeneration();
+        const currentUnplaced = result.unplaced.length;
+        const currentPenalty = result.totalPenalty || 0;
 
-        if (result.unplaced.length < bestAttempt.unplacedCount) {
+        // Нова умова: краще, якщо менше нерозміщених уроків. 
+        // А якщо їх стільки ж, то краще той варіант, де менша сума штрафів.
+        if (currentUnplaced < bestAttempt.unplacedCount || 
+           (currentUnplaced === bestAttempt.unplacedCount && currentPenalty < bestAttempt.totalPenalty)) {
+            
             bestAttempt = {
                 schedule: JSON.parse(JSON.stringify(result.schedule)),
-                unplacedCount: result.unplaced.length,
+                unplacedCount: currentUnplaced,
+                totalPenalty: currentPenalty, // <--- ЗБЕРІГАЄМО ШТРАФ
                 unplacedList: result.unplaced,
                 unpairedAlternating: result.unpairedAlternating,
                 overflowTasks: result.overflowTasks || []
@@ -427,6 +435,7 @@ function runSingleGeneration() {
     let tempSchedule = state.schedule.filter(s => s.slot === 0 || s.slot === 8 || s.isManual);
     let unplaced = [];
     let unpairedAlternating = [];
+    let totalGenerationPenalty = 0;
 
     // ── ПІДГОТОВКА НАВАНТАЖЕННЯ ──
     const flatWorkload = [];
@@ -578,13 +587,36 @@ function runSingleGeneration() {
         }
     });
 
-    // ── СОРТУВАННЯ: важливіші + труд/технол на початок (для пакування парами) ──
+    // ── СОРТУВАННЯ: Розумне пакування ──
+    const getTeacherScarcity = (teacherId) => {
+        const t = state.teachers.find(x => x.id === teacherId);
+        if (!t) return 0;
+        // Рахуємо кількість доступних слотів (не червоних)
+        const available = t.availability.reduce((acc, day) => 
+            acc + day.filter((s, idx) => idx >= 1 && idx <= 7 && s !== 2).length, 0);
+        const total = t.workload.reduce((sum, w) => sum + parseFloat(w.hours || 0), 0);
+        return total / (available || 1);
+    };
+
     tasks.sort((a, b) => {
-        const aIsLabor = isLaborSubject(a.items[0].subject);
-        const bIsLabor = isLaborSubject(b.items[0].subject);
+        const itA = a.items[0];
+        const itB = b.items[0];
+        
+        // 1. Трудове все ще на самому початку (як ти і хотів)
+        const aIsLabor = isLaborSubject(itA.subject);
+        const bIsLabor = isLaborSubject(itB.subject);
         if (aIsLabor !== bIsLabor) return aIsLabor ? -1 : 1;
+        
+        // 2. Далі за пріоритетом (1 - найважливіші)
         if (a.priority !== b.priority) return a.priority - b.priority;
-        return (Math.random() - 0.5) * 0.3;
+        
+        // 3. ПРИ ОДНАКОВОМУ ПРІОРИТЕТІ: спочатку вчителі з дефіцитом місць
+        const scarcityA = getTeacherScarcity(itA.teacherId);
+        const scarcityB = getTeacherScarcity(itB.teacherId);
+        if (Math.abs(scarcityA - scarcityB) > 0.01) return scarcityB - scarcityA;
+        
+        // 4. Тільки в самому кінці трохи рандому
+        return (Math.random() - 0.5);
     });
 
     // ── ЛІЧИЛЬНИК БАЛАНСУВАННЯ ВЧИТЕЛІВ ──
@@ -703,21 +735,71 @@ function runSingleGeneration() {
         // Залишки (не поміщені ні в жоден день) — пробуємо з relaxed обмеженнями
         if (pendingTasks.length > 0) {
             pendingTasks.forEach(task => {
-                const item = task.items[0];
-                let placed = tryPlaceTask(task, item, task.priority, tempSchedule, teacherDayCount, false);
-                if (!placed) placed = tryPlaceTask(task, item, task.priority, tempSchedule, teacherDayCount, true);
-                if (placed) {
-                    // ok
+                const firstItem = task.items[0];
+                const priority = task.priority;
+                
+                // 1. Звичайна спроба
+                let res = tryPlaceTask(task, firstItem, priority, tempSchedule, teacherDayCount, false);
+                if (!res) res = tryPlaceTask(task, firstItem, priority, tempSchedule, teacherDayCount, true);
+                
+                if (res) {
+                    totalGenerationPenalty += (res.pen || 0);
                 } else {
-                    const tObj = state.teachers.find(t => t.id === item.teacherId);
-                    const clsObj = state.classes.find(c => c.id === item.classId);
-                    unplaced.push(`${item.subject} (${tObj ? tObj.name : '?'}) — ${clsObj ? clsObj.name : '?'} кл`);
+                    // 2. ЯКЩО НЕ ВЛІЗЛО — ЗАПУСКАЄМО ШАФФЛ (SWAP)
+                    let swapped = false;
+                    const days = [0, 1, 2, 3, 4].sort(() => Math.random() - 0.5);
+                    
+                    for (const d of days) {
+                        for (let s = 1; s <= 7; s++) {
+                            const existingIdx = tempSchedule.findIndex(ls => ls.classId === firstItem.classId && ls.day === d && ls.slot === s);
+                            
+                            if (existingIdx !== -1) {
+                                const existing = tempSchedule[existingIdx];
+                                const existingPriority = getPriority(existing.subject);
+                                
+                                // Якщо на місці легший предмет (напр. малювання), а нам треба вткнути математику
+                                if (existingPriority > priority) {
+                                    // Перевіряємо вчителя через твою функцію getTeacherStatus
+                                    const teacherBusy = tempSchedule.some(ls => ls.day === d && ls.slot === s && ls.teacherId === firstItem.teacherId);
+                                    const isRed = getTeacherStatus(firstItem.teacherId, d, s) === 2;
+
+                                    if (!teacherBusy && !isRed) {
+                                        // Шукаємо вікно для легкого предмета на 8-й урок
+                                        const isSlot8Busy = tempSchedule.some(ls => ls.classId === firstItem.classId && ls.day === d && ls.slot === 8);
+                                        const teacher8Free = !tempSchedule.some(ls => ls.day === d && ls.slot === 8 && ls.teacherId === existing.teacherId);
+
+                                        if (!isSlot8Busy && teacher8Free) {
+                                            existing.slot = 8; // Переносимо легкий вниз
+                                            commitTask(task, d, s, tempSchedule, teacherDayCount);
+                                            totalGenerationPenalty += 20000; 
+                                            swapped = true;
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                            if (swapped) break;
+                        }
+                        if (swapped) break;
+                    }
+
+                    if (!swapped) {
+                        const tObj = state.teachers.find(t => t.id === firstItem.teacherId);
+                        const clsObj = state.classes.find(c => c.id === firstItem.classId);
+                        unplaced.push(`${firstItem.subject} (${tObj ? tObj.name : '?'}) — ${clsObj ? clsObj.name : '?'} кл`);
+                    }
                 }
             });
         }
     });
 
-    return { schedule: tempSchedule, unplaced, unpairedAlternating, overflowTasks };
+    return { 
+        schedule: tempSchedule, 
+        unplaced, 
+        unpairedAlternating, 
+        overflowTasks,
+        totalPenalty: totalGenerationPenalty 
+    };
 }
 
 // =============================================================
@@ -790,22 +872,32 @@ function calcPenalty(task, firstItem, d, s, tempSchedule, teacherDayCount, relax
 
     // Логіка пар для складних предметів (Пріоритет 1)
     if (priority === 1) {
-        const hoursPerWeek = parseFloat(firstItem.hours || 1);
-        const workingDays = 5;
+        const teacher = state.teachers.find(t => t.id === firstItem.teacherId);
+        
+        // РЕАЛЬНІ робочі дні (рахуємо дні, де є хоча б один не червоний слот)
+        const realWorkingDays = teacher ? teacher.availability.filter(day => 
+            day.some((status, idx) => idx >= 1 && idx <= 7 && status !== 2)
+        ).length : 5;
+    
+        const hoursPerWeek = parseFloat(firstItem.totalHours || firstItem.hours || 1);
+        
         const sameSubjectToday = tempSchedule.filter(ls =>
             ls.day === d && ls.classId === firstItem.classId && ls.subject === firstItem.subject
         );
+    
         if (sameSubjectToday.length > 0) {
-            if (hoursPerWeek > workingDays) {
-                // Дозволяємо пару — але тільки якщо йдуть підряд (1-2, 3-4 і т.д.)
+            // Якщо годин більше, ніж реальних робочих днів — пара МАЄ БУТИ (це виживання)
+            if (hoursPerWeek > realWorkingDays) {
                 const isAdj = sameSubjectToday.some(ls => Math.abs(ls.slot - s) === 1);
-                const isPairSlot = isAdj && (Math.min(...sameSubjectToday.map(ls => ls.slot), s) % 2 === 1);
-                pen += isPairSlot ? 100 : 8000;
+                // Якщо це пара — штраф мінімальний (10), якщо розірвано — штраф 5000
+                pen += isAdj ? 10 : 5000;
             } else {
-                pen += 8000; // Не потрібна пара — великий штраф
+                // Якщо днів вистачає, але код все одно хоче пару — великий штраф, щоб не захаращувати день
+                pen += 8000; 
             }
         }
     } else if (priority >= 2) {
+        // ... твій існуючий код для пріоритету 2 (можна лишити як є)
         const sameSubjectToday = tempSchedule.filter(ls =>
             ls.day === d && ls.classId === firstItem.classId && ls.subject === firstItem.subject
         ).length;
@@ -1000,9 +1092,10 @@ function tryPlaceTask(task, firstItem, priority, tempSchedule, teacherDayCount, 
 
     if (bestSlot) {
         commitTask(task, bestSlot.d, bestSlot.s, tempSchedule, teacherDayCount);
-        return true;
+        // Повертаємо об'єкт із результатом та штрафом
+        return { pen: minPen }; 
     }
-    return false;
+    return null;
 }
 
 // =============================================================
