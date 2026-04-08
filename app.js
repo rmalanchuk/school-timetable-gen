@@ -832,6 +832,18 @@ function canPlaceTaskAtSlot(task, firstItem, d, s, tempSchedule) {
         )) return false;
     }
 
+    // Перевірка на створення великих вікон (>2 уроків поспіль)
+    const teacherLessonsAfterPlace = [...tempSchedule.filter(ls => 
+        ls.day === d && ls.teacherId === firstItem.teacherId && ls.slot >= 1 && ls.slot <= 7
+    ), { slot: s }].sort((a, b) => a.slot - b.slot);
+    
+    let maxGap = 0;
+    for (let i = 1; i < teacherLessonsAfterPlace.length; i++) {
+        const gap = teacherLessonsAfterPlace[i].slot - teacherLessonsAfterPlace[i-1].slot - 1;
+        if (gap > maxGap) maxGap = gap;
+    }
+    if (maxGap >= 3) return false;  // Забороняємо вікна більше 2 уроків
+
     return true;
 }
 
@@ -843,7 +855,12 @@ function calcPenalty(task, firstItem, d, s, tempSchedule, teacherDayCount, relax
     const priority = task.priority;
 
     const maxStatus = task.items.reduce((max, it) => Math.max(max, getTeacherStatus(it.teacherId, d, s)), 0);
-    if (maxStatus === 1) pen += relaxed ? 500 : 1500;
+    if (maxStatus === 1) {
+        // Якщо це останній урок дня (7) або перший (1) - менший штраф
+        if (s === 7 || s === 1) pen += relaxed ? 200 : 600;
+        else if (s === 6) pen += relaxed ? 300 : 900;
+        else pen += relaxed ? 500 : 1500;
+    }
 
     // Парні чергування (один вчитель різні класи) дозволяємо на останній слот без штрафу
     const isPairedExternal = task.type === 'paired_external';
@@ -913,11 +930,23 @@ function calcPenalty(task, firstItem, d, s, tempSchedule, teacherDayCount, relax
         if (teacherLessonsToday.length > 0) {
             const dists = teacherLessonsToday.map(ls => Math.abs(ls.slot - s));
             const minDist = Math.min(...dists);
-            if (minDist === 1) pen -= 150;
-            else if (minDist === 2) pen += 100;
-            else pen += minDist * 150;
+            if (minDist === 1) pen -= 200;  // сусідній урок - добре
+            else if (minDist === 2) pen += 200;  // одне вікно - терпимо
+            else if (minDist === 3) pen += 800;  // два вікна - погано
+            else if (minDist === 4) pen += 2000; // три вікна - дуже погано
+            else pen += 5000;  // велике вікно - катастрофа
+            
+            // Додатковий штраф, якщо це створює вікно з обох боків
+            const hasLessonBefore = teacherLessonsToday.some(ls => ls.slot === s - 1);
+            const hasLessonAfter = teacherLessonsToday.some(ls => ls.slot === s + 1);
+            if (!hasLessonBefore && !hasLessonAfter && teacherLessonsToday.length > 0) {
+                pen += 1500;  // ізольований урок посеред дня
+            }
         } else {
-            pen += (s - 1) * 80;
+            // Перший урок дня - менший штраф, якщо рано
+            if (s <= 2) pen += (s - 1) * 50;
+            else if (s <= 4) pen += (s - 1) * 80;
+            else pen += (s - 1) * 150;
         }
 
         const teacherCountToday = (teacherDayCount[firstItem.teacherId] || [0,0,0,0,0])[d];
@@ -1151,6 +1180,71 @@ function redistributeToFriday(classId, tempSchedule, teacherDayCount) {
     return false;
 }
 
+// =============================================================
+// КРИТИЧНИЙ ФІКС #7: Закриття великих вікон
+// =============================================================
+function closeLargeGaps(tempSchedule) {
+    let changed = false;
+    
+    for (let day = 0; day < 5; day++) {
+        // Для кожного вчителя в цей день
+        const teachersInDay = [...new Set(tempSchedule
+            .filter(ls => ls.day === day && !ls.isManual)
+            .map(ls => ls.teacherId))];
+        
+        for (const teacherId of teachersInDay) {
+            const lessons = tempSchedule
+                .filter(ls => ls.day === day && ls.teacherId === teacherId && !ls.isManual)
+                .sort((a, b) => a.slot - b.slot);
+            
+            if (lessons.length < 2) continue;
+            
+            // Шукаємо великі прогалини
+            for (let i = 1; i < lessons.length; i++) {
+                const prev = lessons[i-1];
+                const curr = lessons[i];
+                const gap = curr.slot - prev.slot - 1;
+                
+                if (gap >= 2) {  // Вікно з 2+ пропущених уроків
+                    // Шукаємо урок, який можна перемістити в цю прогалину
+                    for (let slotToFill = prev.slot + 1; slotToFill < curr.slot; slotToFill++) {
+                        // Шукаємо будь-який урок цього вчителя в інший день
+                        const movableLesson = tempSchedule.find(ls => 
+                            ls.teacherId === teacherId && 
+                            ls.day !== day && 
+                            !ls.isManual &&
+                            getTeacherStatus(teacherId, day, slotToFill) !== 2
+                        );
+                        
+                        if (movableLesson) {
+                            // Перевіряємо, чи вільне місце в класі
+                            const classFree = !tempSchedule.some(ls =>
+                                ls.day === day && ls.slot === slotToFill && ls.classId === movableLesson.classId
+                            );
+                            
+                            if (classFree) {
+                                const idx = tempSchedule.indexOf(movableLesson);
+                                if (idx !== -1) {
+                                    tempSchedule.splice(idx, 1);
+                                    tempSchedule.push({
+                                        ...movableLesson,
+                                        id: 'sch_gap_' + Date.now() + Math.random(),
+                                        day: day,
+                                        slot: slotToFill
+                                    });
+                                    changed = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return changed;
+}
+
 function isLaborSubject(subject) {
     if (!subject) return false;
     const n = subject.toLowerCase();
@@ -1212,6 +1306,31 @@ function tryPlaceTask(task, firstItem, priority, tempSchedule, teacherDayCount, 
         commitTask(task, bestSlot.d, bestSlot.s, tempSchedule, teacherDayCount);
         return true;
     }
+
+    // Спеціальна спроба для status=1 (Небажано) або для заповнення вікон
+    for (let d of sortedDays) {
+        // Отримуємо поточні уроки вчителя в цей день
+        const teacherLessons = tempSchedule.filter(ls => 
+            ls.day === d && ls.teacherId === firstItem.teacherId && ls.slot >= 1 && ls.slot <= 7
+        ).sort((a, b) => a.slot - b.slot);
+        
+        if (teacherLessons.length === 0) continue;
+        
+        // Шукаємо місця, які закриють вікна (на 1 слот після існуючого уроку)
+        for (const lesson of teacherLessons) {
+            const candidateSlot = lesson.slot + 1;
+            if (candidateSlot > 7) continue;
+            
+            if (tempSchedule.some(ls => ls.day === d && ls.slot === candidateSlot && ls.classId === firstItem.classId)) continue;
+            if (tempSchedule.some(ls => ls.day === d && ls.slot === candidateSlot && ls.teacherId === firstItem.teacherId)) continue;
+            if (getTeacherStatus(firstItem.teacherId, d, candidateSlot) === 2) continue;
+            
+            // Дозволяємо навіть якщо status=1 (жовтий)
+            commitTask(task, d, candidateSlot, tempSchedule, teacherDayCount);
+            return true;
+        }
+    }
+    
     return false;
 }
 
