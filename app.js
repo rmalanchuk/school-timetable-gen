@@ -738,14 +738,15 @@ function runSingleGeneration() {
                 const firstItem = task.items[0];
                 const priority = task.priority;
                 
-                // 1. Звичайна спроба
+                // 1. Спробувати поставити урок звичайним способом
                 let res = tryPlaceTask(task, firstItem, priority, tempSchedule, teacherDayCount, false);
                 if (!res) res = tryPlaceTask(task, firstItem, priority, tempSchedule, teacherDayCount, true);
                 
                 if (res) {
+                    // Якщо влізло — додаємо штраф, який повернула функція tryPlaceTask
                     totalGenerationPenalty += (res.pen || 0);
                 } else {
-                    // 2. ЯКЩО НЕ ВЛІЗЛО — ЗАПУСКАЄМО ШАФФЛ (SWAP)
+                    // 2. ЯКЩО НЕ ВЛІЗЛО — ШАФФЛ (SWAP)
                     let swapped = false;
                     const days = [0, 1, 2, 3, 4].sort(() => Math.random() - 0.5);
                     
@@ -757,21 +758,19 @@ function runSingleGeneration() {
                                 const existing = tempSchedule[existingIdx];
                                 const existingPriority = getPriority(existing.subject);
                                 
-                                // Якщо на місці легший предмет (напр. малювання), а нам треба вткнути математику
                                 if (existingPriority > priority) {
-                                    // Перевіряємо вчителя через твою функцію getTeacherStatus
                                     const teacherBusy = tempSchedule.some(ls => ls.day === d && ls.slot === s && ls.teacherId === firstItem.teacherId);
                                     const isRed = getTeacherStatus(firstItem.teacherId, d, s) === 2;
 
                                     if (!teacherBusy && !isRed) {
-                                        // Шукаємо вікно для легкого предмета на 8-й урок
                                         const isSlot8Busy = tempSchedule.some(ls => ls.classId === firstItem.classId && ls.day === d && ls.slot === 8);
-                                        const teacher8Free = !tempSchedule.some(ls => ls.day === d && ls.slot === 8 && ls.teacherId === existing.teacherId);
+                                        const teacher8Busy = tempSchedule.some(ls => ls.day === d && ls.slot === 8 && ls.teacherId === existing.teacherId);
+                                        const teacher8Red = getTeacherStatus(existing.teacherId, d, 8) === 2;
 
-                                        if (!isSlot8Busy && teacher8Free) {
-                                            existing.slot = 8; // Переносимо легкий вниз
+                                        if (!isSlot8Busy && !teacher8Busy && !teacher8Red) {
+                                            existing.slot = 8;
                                             commitTask(task, d, s, tempSchedule, teacherDayCount);
-                                            totalGenerationPenalty += 20000; 
+                                            totalGenerationPenalty += 20000;
                                             swapped = true;
                                             break;
                                         }
