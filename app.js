@@ -1123,50 +1123,6 @@ function showGenerationReport(errors, unpairedAlternating, overflowTasks, attemp
 
     // Блок overflow: уроки що не влізли через ліміт 35 уроків в класі
     if (hasOverflow) {
-        // Групуємо по класах для зручності
-        const byClass = {};
-        overflowTasks.forEach(ot => {
-            if (!byClass[ot.className]) byClass[ot.className] = [];
-            byClass[ot.className].push(ot);
-        });
-
-        reportHtml += `
-        <div class="p-4 bg-red-50 border-red-500 border-l-4 rounded shadow-sm">
-            <h3 class="font-bold text-red-800 mb-1">
-                🚫 Перевищення ліміту 35 уроків — ${overflowTasks.length} урок(ів) не розміщено
-            </h3>
-            <p class="text-[11px] text-red-700 mb-3">
-                У деяких класів кількість годин перевищує 35 (максимум на тиждень).
-                Нижче — уроки, які були автоматично виключені з розкладу (легкі предмети, пріоритет 2–3).
-                Рекомендується поставити їх вручну на <strong>0-й або 8-й урок</strong>.
-            </p>
-            <div class="space-y-3">
-                ${Object.entries(byClass).map(([className, items]) => `
-                    <div class="bg-white rounded-lg border border-red-200 p-3">
-                        <div class="font-bold text-red-700 mb-2 text-[12px]">
-                            Клас ${className} — ${items.length} зайв. урок(ів):
-                        </div>
-                        <ul class="space-y-1">
-                            ${items.map(ot => `
-                                <li class="text-[11px] text-slate-700 flex items-center gap-2">
-                                    <span class="w-2 h-2 rounded-full ${ot.priority === 3 ? 'bg-green-400' : 'bg-yellow-400'} inline-block flex-shrink-0"></span>
-                                    <span><strong>${ot.subject}</strong> — ${ot.teacher}</span>
-                                    <span class="text-[9px] text-gray-400">(пріор. ${ot.priority}${ot.type !== 'single' ? ', чергування' : ''})</span>
-                                </li>
-                            `).join('')}
-                        </ul>
-                    </div>
-                `).join('')}
-            </div>
-            <p class="mt-2 text-[10px] italic text-red-600">
-                💡 Порада: розмістіть ці уроки на 0-й або 8-й урок вручну в таблиці розкладу.
-                Легкі предмети (фізкультура, мистецтво, труд) добре підходять як нульовий або восьмий урок.
-            </p>
-        </div>`;
-    }
-
-    // Блок overflow: уроки що не влізли через ліміт 35 уроків в класі
-    if (hasOverflow) {
         const byClass = {};
         overflowTasks.forEach(ot => {
             if (!byClass[ot.className]) byClass[ot.className] = [];
