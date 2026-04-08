@@ -1036,7 +1036,7 @@ function tryLocalSwap(classId, day, targetSlot, pendingTasks, tempSchedule, teac
     return false;
 }
 
-/ =============================================================
+// =============================================================
 // КРИТИЧНИЙ ФІКС #5: Агресивний SWAP для звільнення слотів
 // =============================================================
 function tryAggressiveSwap(classId, day, targetSlot, tempSchedule, teacherDayCount) {
