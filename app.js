@@ -615,17 +615,22 @@ function runSingleGeneration() {
     // Вчителі з малою кількістю вільних слотів йдуть ПЕРШИМИ
     // ══════════════════════════════════════════════════════════
     tasks.sort((a, b) => {
-        // Спочатку за дефіцитом вчителя (менше слотів = вищий пріоритет)
+        // 1. СПОЧАТКУ — вчителі з найменшою кількістю ДОСТУПНИХ ДНІВ
+        const aDays = Math.min(...a.items.map(it => countTeacherAvailableDays(it.teacherId)));
+        const bDays = Math.min(...b.items.map(it => countTeacherAvailableDays(it.teacherId)));
+        if (aDays !== bDays) return aDays - bDays;
+        
+        // 2. Потім — вчителі з найменшою кількістю СЛОТІВ
         const aSlots = Math.min(...a.items.map(it => countTeacherAvailableSlots(it.teacherId)));
         const bSlots = Math.min(...b.items.map(it => countTeacherAvailableSlots(it.teacherId)));
         if (aSlots !== bSlots) return aSlots - bSlots;
         
-        // Потім труд/технологія
+        // 3. Потім труд/технологія
         const aIsLabor = isLaborSubject(a.items[0].subject);
         const bIsLabor = isLaborSubject(b.items[0].subject);
         if (aIsLabor !== bIsLabor) return aIsLabor ? -1 : 1;
         
-        // Потім за пріоритетом предмета
+        // 4. Потім за пріоритетом предмета
         if (a.priority !== b.priority) return a.priority - b.priority;
         
         return (Math.random() - 0.5) * 0.3;
@@ -720,7 +725,11 @@ function runSingleGeneration() {
                     pendingTasks = pendingTasks.filter(t => t !== task);
                     slotCursor++;
                 } else {
-                    const swapped = tryLocalSwap(cId, d, slotCursor, remainInDay, tempSchedule, teacherDayCount);
+                    // Спершу пробуємо простий swap
+                    let swapped = tryLocalSwap(cId, d, slotCursor, remainInDay, tempSchedule, teacherDayCount);
+                    // Якщо не допомогло — агресивний
+                    if (!swapped) swapped = tryAggressiveSwap(cId, d, slotCursor, tempSchedule, teacherDayCount);
+                    
                     if (swapped) {
                         const newSlots = getClassSlotsToday();
                         slotCursor = newSlots.length === 0 ? 1 : Math.max(...newSlots) + 1;
@@ -733,6 +742,24 @@ function runSingleGeneration() {
 
         // Fallback для залишків
         if (pendingTasks.length > 0) {
+            // СПРОБА 1: Перерозподілити на п'ятницю, щоб звільнити місце
+            let redistributed = false;
+            for (let attempt = 0; attempt < 3 && pendingTasks.length > 0; attempt++) {
+                redistributed = redistributeToFriday(cId, tempSchedule, teacherDayCount);
+                if (!redistributed) break;
+                
+                // Повторно пробуємо розмістити задачі після перерозподілу
+                const stillPending = [...pendingTasks];
+                pendingTasks = [];
+                for (const task of stillPending) {
+                    const item = task.items[0];
+                    let placed = tryPlaceTask(task, item, task.priority, tempSchedule, teacherDayCount, false);
+                    if (!placed) placed = tryPlaceTask(task, item, task.priority, tempSchedule, teacherDayCount, true);
+                    if (!placed) pendingTasks.push(task);
+                }
+            }
+            
+            // СПРОБА 2: Звичайний fallback
             pendingTasks.forEach(task => {
                 const item = task.items[0];
                 let placed = tryPlaceTask(task, item, task.priority, tempSchedule, teacherDayCount, false);
@@ -1006,6 +1033,121 @@ function tryLocalSwap(classId, day, targetSlot, pendingTasks, tempSchedule, teac
         return true;
     }
 
+    return false;
+}
+
+/ =============================================================
+// КРИТИЧНИЙ ФІКС #5: Агресивний SWAP для звільнення слотів
+// =============================================================
+function tryAggressiveSwap(classId, day, targetSlot, tempSchedule, teacherDayCount) {
+    // Збираємо всі уроки класу в цей день (крім manual)
+    const lessonsToday = tempSchedule
+        .filter(ls => ls.day === day && ls.classId === classId && !ls.isManual)
+        .sort((a, b) => a.slot - b.slot);
+    
+    if (lessonsToday.length < 2) return false;
+    
+    // Шукаємо вільний слот у цьому дні
+    const occupiedSlots = new Set(lessonsToday.map(l => l.slot));
+    let freeSlot = -1;
+    for (let s = 1; s <= 7; s++) {
+        if (!occupiedSlots.has(s)) {
+            freeSlot = s;
+            break;
+        }
+    }
+    
+    if (freeSlot === -1) return false;
+    
+    // Пробуємо "зсунути" останній урок на вільний слот
+    for (let i = lessonsToday.length - 1; i >= 0; i--) {
+        const lesson = lessonsToday[i];
+        
+        // Чи можна перемістити цей урок на freeSlot?
+        if (freeSlot > lesson.slot) {
+            const teacherFree = !tempSchedule.some(ls => 
+                ls.day === day && ls.slot === freeSlot && ls.teacherId === lesson.teacherId
+            );
+            const notRed = getTeacherStatus(lesson.teacherId, day, freeSlot) !== 2;
+            
+            if (teacherFree && notRed) {
+                // Переміщуємо
+                const idx = tempSchedule.indexOf(lesson);
+                if (idx !== -1) {
+                    tempSchedule.splice(idx, 1);
+                    tempSchedule.push({
+                        ...lesson,
+                        id: 'sch_aggr_' + Date.now() + Math.random(),
+                        slot: freeSlot
+                    });
+                    return true;
+                }
+            }
+        }
+        freeSlot = lesson.slot; // Продовжуємо зсув вліво
+    }
+    
+    return false;
+}
+
+// =============================================================
+// КРИТИЧНИЙ ФІКС #6: Перерозподіл уроків на п'ятницю
+// =============================================================
+function redistributeToFriday(classId, tempSchedule, teacherDayCount) {
+    const friday = 4; // П'ятниця
+    
+    // Перебираємо дні з Понеділка по Четвер
+    for (let day = 0; day < 4; day++) {
+        const lessonsThatDay = tempSchedule.filter(ls => 
+            ls.day === day && ls.classId === classId && !ls.isManual
+        );
+        
+        for (const lesson of lessonsThatDay) {
+            const teacher = state.teachers.find(t => t.id === lesson.teacherId);
+            if (!teacher) continue;
+            
+            // Перевіряємо, чи може цей вчитель працювати в п'ятницю
+            let canWorkFriday = false;
+            for (let s = 1; s <= 7; s++) {
+                if (getTeacherStatus(lesson.teacherId, friday, s) !== 2) {
+                    canWorkFriday = true;
+                    break;
+                }
+            }
+            
+            if (!canWorkFriday) continue;
+            
+            // Шукаємо вільний слот у п'ятницю
+            for (let s = 1; s <= 7; s++) {
+                const classFree = !tempSchedule.some(ls => 
+                    ls.day === friday && ls.slot === s && ls.classId === classId
+                );
+                const teacherFree = !tempSchedule.some(ls => 
+                    ls.day === friday && ls.slot === s && ls.teacherId === lesson.teacherId
+                );
+                const notRed = getTeacherStatus(lesson.teacherId, friday, s) !== 2;
+                
+                if (classFree && teacherFree && notRed) {
+                    // Переміщуємо урок на п'ятницю
+                    const idx = tempSchedule.indexOf(lesson);
+                    if (idx !== -1) {
+                        tempSchedule.splice(idx, 1);
+                        if (teacherDayCount[lesson.teacherId]) {
+                            teacherDayCount[lesson.teacherId][day]--;
+                            teacherDayCount[lesson.teacherId][friday]++;
+                        }
+                        tempSchedule.push({
+                            ...lesson,
+                            id: 'sch_redist_' + Date.now() + Math.random(),
+                            day: friday,
+                            slot: s
+                        });
+                        return true; // Звільнили слот
+                    }
+                }
+            }
+        }
+    }
     return false;
 }
 
