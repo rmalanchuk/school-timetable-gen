@@ -1121,21 +1121,6 @@ function calcPenalty(task, firstItem, d, s, tempSchedule, teacherDayCount, relax
         }
     }
 
-    // Штраф за повторення того самого предмета в один день
-    const sameSubjectCount = tempSchedule.filter(ls => 
-        ls.day === d && 
-        ls.classId === firstItem.classId && 
-        ls.subject === firstItem.subject
-    ).length;
-    
-    if (sameSubjectCount === 1) {
-        // Другий урок того ж предмета в день
-        pen += relaxed ? 3000 : 8000;
-    } else if (sameSubjectCount >= 2) {
-        // Третій — неможливо
-        pen += 100000;
-    }
-
     // Розумний штраф за повторення предмета
     const sameSubjectCount = tempSchedule.filter(ls => 
         ls.day === d && 
