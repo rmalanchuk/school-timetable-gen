@@ -858,11 +858,69 @@ function runSingleGeneration() {
 function canPlaceTaskAtSlot(task, firstItem, d, s, tempSchedule) {
     // НІКОЛИ не ставимо на слот 8 автоматично
     if (s === 8) return false;
+
+    // Спеціальна обробка для трудового навчання
+    if (isLaborSubject(firstItem.subject)) {
+        // Шукаємо, чи є вже трудове в цей день
+        const laborToday = tempSchedule.filter(ls => 
+            ls.day === d && 
+            ls.classId === firstItem.classId && 
+            isLaborSubject(ls.subject)
+        );
+        
+        if (laborToday.length === 1) {
+            // Вже є один урок трудового — перевіряємо, чи ставимо поруч
+            const existingSlot = laborToday[0].slot;
+            const isAdjacent = Math.abs(existingSlot - s) === 1;
+            if (!isAdjacent) return false; // Тільки пара!
+        } else if (laborToday.length >= 2) {
+            return false; // Не більше 2 уроків трудового в день
+        }
+    }
     
     if (tempSchedule.some(ls => ls.day === d && ls.slot === s && ls.classId === firstItem.classId)) return false;
-    if (task.items.some(it => tempSchedule.some(ls => ls.day === d && ls.slot === s && ls.teacherId === it.teacherId))) return false;
-    if (task.items.some(it => getTeacherStatus(it.teacherId, d, s) === 2)) return false;
-
+    // Розумна перевірка кількості однакових предметів
+    const sameSubjectToday = tempSchedule.filter(ls => 
+        ls.day === d && 
+        ls.classId === firstItem.classId && 
+        ls.subject === firstItem.subject
+    ).length;
+    
+    // Розраховуємо, скільки ВСЬОГО уроків цього предмета потрібно для класу
+    const totalNeeded = state.workload
+        .filter(w => w.classId === firstItem.classId && w.subject === firstItem.subject)
+        .reduce((sum, w) => sum + Math.ceil(parseFloat(w.hours)), 0);
+    
+    // Скільки днів доступно для цього вчителя
+    const availableDays = countTeacherAvailableDays(firstItem.teacherId);
+    
+    // Скільки днів у тижні (5)
+    const totalDays = 5;
+    
+    // Якщо уроків більше, ніж днів, то пари неминучі
+    const mustHavePairs = totalNeeded > totalDays;
+    // Якщо уроків більше, ніж доступних днів вчителя, теж неминучі пари
+    const mustHavePairsDueTeacher = totalNeeded > availableDays;
+    
+    if (mustHavePairs || mustHavePairsDueTeacher) {
+        // Дозволяємо пари, але не більше 2 уроків в день
+        if (sameSubjectToday >= 2) return false;
+        
+        // Перевіряємо, чи це суміжні слоти (для пар)
+        const existingSlots = tempSchedule
+            .filter(ls => ls.day === d && ls.classId === firstItem.classId && ls.subject === firstItem.subject)
+            .map(ls => ls.slot);
+        
+        if (existingSlots.length === 1) {
+            const existingSlot = existingSlots[0];
+            const isAdjacent = Math.abs(existingSlot - s) === 1;
+            // Якщо це не суміжний слот — забороняємо (погані пари)
+            if (!isAdjacent) return false;
+        }
+    } else {
+        // Якщо уроків не більше, ніж днів — забороняємо пари взагалі
+        if (sameSubjectToday >= 1) return false;
+    }
     // ══════════════════════════════════════════════════════════
     // КРИТИЧНИЙ ФІКС #3: Логіка пар для пріоритету 1
     // Дозволяємо пари коли уроків > доступних днів
@@ -1060,6 +1118,49 @@ function calcPenalty(task, firstItem, d, s, tempSchedule, teacherDayCount, relax
         if (s !== lastSlot && !createsGap) {
             // Урок вставлений в середину, але не створює вікно (це добре)
             pen -= 100;
+        }
+    }
+
+    // Штраф за повторення того самого предмета в один день
+    const sameSubjectCount = tempSchedule.filter(ls => 
+        ls.day === d && 
+        ls.classId === firstItem.classId && 
+        ls.subject === firstItem.subject
+    ).length;
+    
+    if (sameSubjectCount === 1) {
+        // Другий урок того ж предмета в день
+        pen += relaxed ? 3000 : 8000;
+    } else if (sameSubjectCount >= 2) {
+        // Третій — неможливо
+        pen += 100000;
+    }
+
+    // Розумний штраф за повторення предмета
+    const sameSubjectCount = tempSchedule.filter(ls => 
+        ls.day === d && 
+        ls.classId === firstItem.classId && 
+        ls.subject === firstItem.subject
+    ).length;
+    
+    const totalNeeded = state.workload
+        .filter(w => w.classId === firstItem.classId && w.subject === firstItem.subject)
+        .reduce((sum, w) => sum + Math.ceil(parseFloat(w.hours)), 0);
+    
+    const availableDays = countTeacherAvailableDays(firstItem.teacherId);
+    const mustHavePairs = totalNeeded > availableDays;
+    
+    if (sameSubjectCount >= 1) {
+        if (mustHavePairs) {
+            // Пари неминучі — маленький штраф, якщо не суміжні
+            const existingSlots = tempSchedule
+                .filter(ls => ls.day === d && ls.classId === firstItem.classId && ls.subject === firstItem.subject)
+                .map(ls => ls.slot);
+            const isAdjacent = existingSlots.some(slot => Math.abs(slot - s) === 1);
+            pen += isAdjacent ? 50 : 500;
+        } else {
+            // Пари не потрібні — великий штраф
+            pen += 5000;
         }
     }
 
