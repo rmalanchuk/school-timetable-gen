@@ -2410,27 +2410,24 @@ function buildTasksList() {
 
 // Перевірка, чи можна поставити задачу в конкретний слот
 function canPlaceTask(task, day, slot, currentSchedule) {
-    if (slot === 0 || slot === 8) return false; // Резервні слоти тільки ручні
+    if (slot === 0 || slot === 8) return false;
     
     const firstItem = task.items[0];
     
-    // 1. Перевірка конфліктів з існуючими уроками
+    // 1. БАЗОВІ ПЕРЕВІРКИ (НЕ МОЖНА ПОРУШИТИ)
     for (const item of task.items) {
-        // Конфлікт з іншим уроком в цьому класі
         if (currentSchedule.some(ls => ls.day === day && ls.slot === slot && ls.classId === item.classId)) {
             return false;
         }
-        // Конфлікт з іншим уроком цього вчителя
         if (currentSchedule.some(ls => ls.day === day && ls.slot === slot && ls.teacherId === item.teacherId)) {
             return false;
         }
-        // Червоний день вчителя
         if (getTeacherStatus(item.teacherId, day, slot) === 2) {
             return false;
         }
     }
     
-    // 2. Перевірка кабінетів
+    // 2. КАБІНЕТИ
     const roomType = getRoomType(firstItem.subject);
     if (roomType === 'computer' || roomType === 'gym' || roomType === 'chemistry' || roomType === 'physics') {
         if (currentSchedule.some(ls =>
@@ -2441,7 +2438,7 @@ function canPlaceTask(task, day, slot, currentSchedule) {
         }
     }
     
-    // 3. Перевірка для трудового (тільки парами)
+    // 3. ТРУДОВЕ (тільки парами) - залишаємо
     if (isLaborSubject(firstItem.subject)) {
         const laborToday = currentSchedule.filter(ls =>
             ls.day === day && ls.classId === firstItem.classId && isLaborSubject(ls.subject)
@@ -2453,63 +2450,23 @@ function canPlaceTask(task, day, slot, currentSchedule) {
         if (laborToday.length >= 2) return false;
     }
     
-    // 4. Перевірка кількості однакових предметів в день
+    // 4. КІЛЬКІСТЬ ОДНАКОВИХ ПРЕДМЕТІВ (пом'якшено)
     const sameSubjectToday = currentSchedule.filter(ls =>
         ls.day === day && ls.classId === firstItem.classId && ls.subject === firstItem.subject
     ).length;
     
-    const totalNeeded = state.workload
-        .filter(w => w.classId === firstItem.classId && w.subject === firstItem.subject)
-        .reduce((sum, w) => sum + Math.ceil(parseFloat(w.hours)), 0);
-    const availableDays = countTeacherAvailableDays(firstItem.teacherId);
-    const mustHavePairs = totalNeeded > availableDays;
-    
-    if (sameSubjectToday >= 1) {
-        if (!mustHavePairs) return false; // Без пар — не можна більше 1
-        if (sameSubjectToday >= 2) return false; // Не більше 2 навіть з парами
+    // Математика - максимум 1 в день
+    if (firstItem.subject === 'Математика' && sameSubjectToday >= 1) {
+        return false;
     }
     
-    // 5. Перевірка вікон для класу (суцільний розклад з 1 уроку)
-    const classLessonsToday = currentSchedule
-        .filter(ls => ls.day === day && ls.classId === firstItem.classId && ls.slot >= 1 && ls.slot <= 7)
-        .map(ls => ls.slot)
-        .sort((a, b) => a - b);
-    
-    if (classLessonsToday.length > 0) {
-        const maxSlot = Math.max(...classLessonsToday);
-        // Новий урок повинен бути або на maxSlot+1, або заповнювати вікно
-        if (slot < maxSlot) {
-            // Перевіряємо, чи заповнюємо існуюче вікно
-            const nextExisting = classLessonsToday.find(s => s > slot);
-            if (nextExisting && nextExisting - slot > 1) {
-                return false; // Залишаємо вікно більше 1
-            }
-            const prevExisting = [...classLessonsToday].reverse().find(s => s < slot);
-            if (prevExisting && slot - prevExisting > 1) {
-                return false;
-            }
-        } else if (slot !== maxSlot + 1) {
-            return false; // Новий урок не після останнього і не в вікно
-        }
-    } else if (slot !== 1) {
-        return false; // Перший урок в день повинен бути 1
+    // Інші предмети - максимум 2 в день
+    if (sameSubjectToday >= 2) {
+        return false;
     }
     
-    // 6. Перевірка вікон для вчителя (максимум 1 пропущений урок)
-    const teacherLessonsToday = currentSchedule
-        .filter(ls => ls.day === day && ls.teacherId === firstItem.teacherId && ls.slot >= 1 && ls.slot <= 7)
-        .map(ls => ls.slot)
-        .sort((a, b) => a - b);
-    
-    if (teacherLessonsToday.length > 0) {
-        let maxGap = 0;
-        const allSlots = [...teacherLessonsToday, slot].sort((a, b) => a - b);
-        for (let i = 1; i < allSlots.length; i++) {
-            const gap = allSlots[i] - allSlots[i-1] - 1;
-            if (gap > maxGap) maxGap = gap;
-        }
-        if (maxGap > 2) return false; // Вікно більше 2 заборонено
-    }
+    // 5. ПЕРЕВІРКА ВІКОН ДЛЯ КЛАСУ (пом'якшено - дозволяємо вікна, але штрафуємо)
+    // Тут тільки базові перевірки, без жорстких заборон
     
     return true;
 }
@@ -2520,7 +2477,7 @@ function evaluateSlot(task, day, slot, currentSchedule) {
     const firstItem = task.items[0];
     const priority = task.priority;
     
-    // Пріоритет 1 предмети — тільки 1-4 уроки
+    // Пріоритет 1 предмети — краще в ранніх слотах
     if (priority === 1) {
         if (slot === 4) score += 60;
         else if (slot === 5) score += 180;
@@ -2532,7 +2489,7 @@ function evaluateSlot(task, day, slot, currentSchedule) {
         else if (slot === 7) score += 300;
         else score += (slot - 1) * 15;
     } else {
-        if (slot >= 6) score -= 100; // Бонус для пізніх слотів
+        if (slot >= 6) score -= 100;
         else score += (slot - 1) * 10;
     }
     
@@ -2544,15 +2501,31 @@ function evaluateSlot(task, day, slot, currentSchedule) {
         else score += 1500;
     }
     
-    // Парні чергування краще ставити пізніше
-    if (task.type === 'paired_external' && slot >= 6) {
-        score -= 200;
+    // ШТРАФ ЗА ВІКНА В КЛАСІ (важливо!)
+    const classLessonsToday = currentSchedule
+        .filter(ls => ls.day === day && ls.classId === firstItem.classId && ls.slot >= 1 && ls.slot <= 7)
+        .map(ls => ls.slot)
+        .sort((a, b) => a - b);
+    
+    if (classLessonsToday.length > 0) {
+        const maxSlot = Math.max(...classLessonsToday);
+        if (slot > maxSlot + 1) {
+            // Створює вікно
+            score += 5000;
+        } else if (slot < maxSlot) {
+            // Заповнює вікно (добре)
+            score -= 200;
+        }
+    } else if (slot !== 1) {
+        // Перший урок не з 1 - штраф
+        score += 1000;
     }
     
-    // Штраф за створення вікна у вчителя
+    // Штраф за вікна у вчителя
     const teacherLessonsToday = currentSchedule
         .filter(ls => ls.day === day && ls.teacherId === firstItem.teacherId && ls.slot >= 1 && ls.slot <= 7)
         .map(ls => ls.slot);
+    
     if (teacherLessonsToday.length > 0) {
         let minDist = Infinity;
         for (const existingSlot of teacherLessonsToday) {
@@ -2562,7 +2535,7 @@ function evaluateSlot(task, day, slot, currentSchedule) {
         if (minDist === 1) score -= 200;
         else if (minDist === 2) score += 200;
         else if (minDist === 3) score += 800;
-        else score += 2000;
+        else if (minDist >= 4) score += 2000;
     }
     
     return score;
