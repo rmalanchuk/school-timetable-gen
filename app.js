@@ -295,7 +295,8 @@ async function generateSchedule() {
         schedule: [],
         unplacedCount: Infinity,
         unplacedList: [],
-        unpairedAlternating: []
+        unpairedAlternating: [],
+        overflowTasks: []
     };
 
     let attempt = 0;
@@ -318,7 +319,8 @@ async function generateSchedule() {
                 schedule: JSON.parse(JSON.stringify(result.schedule)),
                 unplacedCount: result.unplaced.length,
                 unplacedList: result.unplaced,
-                unpairedAlternating: result.unpairedAlternating
+                unpairedAlternating: result.unpairedAlternating,
+                overflowTasks: result.overflowTasks || []
             };
         }
 
@@ -336,7 +338,7 @@ async function generateSchedule() {
     renderSchedule();
 
     const duration = ((Date.now() - startTime) / 1000).toFixed(1);
-    showGenerationReport(bestAttempt.unplacedList, bestAttempt.unpairedAlternating, attempt, duration);
+    showGenerationReport(bestAttempt.unplacedList, bestAttempt.unpairedAlternating, bestAttempt.overflowTasks || [], attempt, duration);
 }
 
 function stopGenerator() {
@@ -515,6 +517,67 @@ function runSingleGeneration() {
         });
     });
 
+    // ══════════════════════════════════════════════════════════
+    // OVERFLOW: якщо клас має > 35 слотів — відкладаємо зайві
+    // Пріоритет виносу: спочатку пріоритет 3, потім 2,
+    // потім paired_alternating де обидва НЕ пріоритет 1
+    // Пріоритет 1 ніколи не виноситься
+    // ══════════════════════════════════════════════════════════
+    const overflowTasks = [];
+    const MAX_SLOTS_PER_CLASS = 35;
+
+    // Рахуємо кількість слотів per class (кожна задача = 1 слот)
+    const classSlotsCount = {};
+    classesIds.forEach(cId => { classSlotsCount[cId] = 0; });
+    tasks.forEach(t => {
+        if (classSlotsCount[t.classId] !== undefined) classSlotsCount[t.classId]++;
+    });
+
+    // Для класів де > 35 — вибираємо кандидатів на вигнання
+    classesIds.forEach(cId => {
+        let excess = (classSlotsCount[cId] || 0) - MAX_SLOTS_PER_CLASS;
+        if (excess <= 0) return;
+
+        // Кандидати: НЕ пріоритет 1
+        // Сортуємо: спочатку пріоритет 3 (найлегші), потім 2
+        const candidates = tasks
+            .filter(t => t.classId === cId && t.priority > 1)
+            .sort((a, b) => {
+                const aIsPaired = (a.type === 'paired_internal' || a.type === 'paired_external');
+                const bIsPaired = (b.type === 'paired_internal' || b.type === 'paired_external');
+                // Пріоритет 3 іде першим (більший = легший)
+                if (a.priority !== b.priority) return b.priority - a.priority;
+                // Single виносимо раніше за пари
+                if (aIsPaired !== bIsPaired) return aIsPaired ? 1 : -1;
+                return 0;
+            });
+
+        for (const candidate of candidates) {
+            if (excess <= 0) break;
+            // Для paired: обидва елементи НЕ пріоритет 1
+            if (candidate.type === 'paired_internal' || candidate.type === 'paired_external') {
+                const allNonPrio1 = candidate.items.every(it => getPriority(it.subject) > 1);
+                if (!allNonPrio1) continue;
+            }
+            const idx = tasks.indexOf(candidate);
+            if (idx !== -1) {
+                tasks.splice(idx, 1);
+                const cls = state.classes.find(c => c.id === cId);
+                overflowTasks.push({
+                    subject: candidate.items.map(it => it.subject).join(' / '),
+                    teacher: candidate.items.map(it => {
+                        const t = state.teachers.find(tt => tt.id === it.teacherId);
+                        return t ? t.name : '?';
+                    }).join(' / '),
+                    className: cls ? cls.name : '?',
+                    priority: candidate.priority,
+                    type: candidate.type
+                });
+                excess--;
+            }
+        }
+    });
+
     // ── СОРТУВАННЯ: важливіші + труд/технол на початок (для пакування парами) ──
     tasks.sort((a, b) => {
         const aIsLabor = isLaborSubject(a.items[0].subject);
@@ -654,7 +717,7 @@ function runSingleGeneration() {
         }
     });
 
-    return { schedule: tempSchedule, unplaced, unpairedAlternating };
+    return { schedule: tempSchedule, unplaced, unpairedAlternating, overflowTasks };
 }
 
 // =============================================================
@@ -986,13 +1049,14 @@ function getPriority(subjectName) {
 // =============================================================
 // ЗВІТ ПІСЛЯ ГЕНЕРАЦІЇ
 // =============================================================
-function showGenerationReport(errors, unpairedAlternating, attempts, time) {
+function showGenerationReport(errors, unpairedAlternating, overflowTasks, attempts, time) {
     const output = document.getElementById('schedule-output');
     const existingReport = document.getElementById('gen-report');
     if (existingReport) existingReport.remove();
 
     const isSuccess = errors.length === 0;
     const hasUnpaired = unpairedAlternating && unpairedAlternating.length > 0;
+    const hasOverflow = overflowTasks && overflowTasks.length > 0;
 
     let reportHtml = `<div id="gen-report" class="mt-4 space-y-3">`;
 
@@ -1055,6 +1119,93 @@ function showGenerationReport(errors, unpairedAlternating, attempts, time) {
 
         // Зберігаємо для використання кнопками
         window._unpairedAlternating = unpairedAlternating;
+    }
+
+    // Блок overflow: уроки що не влізли через ліміт 35 уроків в класі
+    if (hasOverflow) {
+        // Групуємо по класах для зручності
+        const byClass = {};
+        overflowTasks.forEach(ot => {
+            if (!byClass[ot.className]) byClass[ot.className] = [];
+            byClass[ot.className].push(ot);
+        });
+
+        reportHtml += `
+        <div class="p-4 bg-red-50 border-red-500 border-l-4 rounded shadow-sm">
+            <h3 class="font-bold text-red-800 mb-1">
+                🚫 Перевищення ліміту 35 уроків — ${overflowTasks.length} урок(ів) не розміщено
+            </h3>
+            <p class="text-[11px] text-red-700 mb-3">
+                У деяких класів кількість годин перевищує 35 (максимум на тиждень).
+                Нижче — уроки, які були автоматично виключені з розкладу (легкі предмети, пріоритет 2–3).
+                Рекомендується поставити їх вручну на <strong>0-й або 8-й урок</strong>.
+            </p>
+            <div class="space-y-3">
+                ${Object.entries(byClass).map(([className, items]) => `
+                    <div class="bg-white rounded-lg border border-red-200 p-3">
+                        <div class="font-bold text-red-700 mb-2 text-[12px]">
+                            Клас ${className} — ${items.length} зайв. урок(ів):
+                        </div>
+                        <ul class="space-y-1">
+                            ${items.map(ot => `
+                                <li class="text-[11px] text-slate-700 flex items-center gap-2">
+                                    <span class="w-2 h-2 rounded-full ${ot.priority === 3 ? 'bg-green-400' : 'bg-yellow-400'} inline-block flex-shrink-0"></span>
+                                    <span><strong>${ot.subject}</strong> — ${ot.teacher}</span>
+                                    <span class="text-[9px] text-gray-400">(пріор. ${ot.priority}${ot.type !== 'single' ? ', чергування' : ''})</span>
+                                </li>
+                            `).join('')}
+                        </ul>
+                    </div>
+                `).join('')}
+            </div>
+            <p class="mt-2 text-[10px] italic text-red-600">
+                💡 Порада: розмістіть ці уроки на 0-й або 8-й урок вручну в таблиці розкладу.
+                Легкі предмети (фізкультура, мистецтво, труд) добре підходять як нульовий або восьмий урок.
+            </p>
+        </div>`;
+    }
+
+    // Блок overflow: уроки що не влізли через ліміт 35 уроків в класі
+    if (hasOverflow) {
+        const byClass = {};
+        overflowTasks.forEach(ot => {
+            if (!byClass[ot.className]) byClass[ot.className] = [];
+            byClass[ot.className].push(ot);
+        });
+
+        reportHtml += `
+        <div class="p-4 bg-red-50 border-red-500 border-l-4 rounded shadow-sm">
+            <h3 class="font-bold text-red-800 mb-1">
+                🚫 Перевищення ліміту 35 уроків — ${overflowTasks.length} урок(ів) не розміщено автоматично
+            </h3>
+            <p class="text-[11px] text-red-700 mb-3">
+                У деяких класів кількість годин перевищує 35 (максимум на тиждень).
+                Ці уроки були автоматично виключені з основного розкладу (легкі предмети, пріоритет 2–3).
+                Рекомендується поставити їх вручну на <strong>0-й або 8-й урок</strong>.
+            </p>
+            <div class="space-y-3">
+                ${Object.entries(byClass).map(([className, items]) => `
+                    <div class="bg-white rounded-lg border border-red-200 p-3">
+                        <div class="font-bold text-red-700 mb-2 text-[12px]">
+                            Клас ${className} — ${items.length} зайв. урок(ів):
+                        </div>
+                        <ul class="space-y-1">
+                            ${items.map(ot => `
+                                <li class="text-[11px] text-slate-700 flex items-center gap-2">
+                                    <span class="w-2 h-2 rounded-full ${ot.priority === 3 ? 'bg-green-400' : 'bg-yellow-400'} inline-block flex-shrink-0"></span>
+                                    <span><strong>${ot.subject}</strong> — ${ot.teacher}</span>
+                                    <span class="text-[9px] text-gray-400">(пріор. ${ot.priority}${ot.type !== 'single' ? ', чергування' : ''})</span>
+                                </li>
+                            `).join('')}
+                        </ul>
+                    </div>
+                `).join('')}
+            </div>
+            <p class="mt-2 text-[10px] italic text-red-600">
+                💡 Порада: розмістіть ці уроки на 0-й або 8-й урок вручну в таблиці розкладу.
+                Легкі предмети (фізкультура, мистецтво, труд) добре підходять як нульовий або восьмий урок.
+            </p>
+        </div>`;
     }
 
     reportHtml += `</div>`;
