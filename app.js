@@ -335,10 +335,19 @@ function stopGenerator() {
 }
 
 function countTotalLessons() {
+    const classesIds = [...new Set(state.workload.map(w => w.classId))];
     let total = 0;
-    state.workload.forEach(item => {
-        const h = parseFloat(item.hours);
-        total += Math.ceil(h);
+    classesIds.forEach(cId => {
+        const items = state.workload.filter(w => w.classId === cId);
+        items.forEach(w => {
+            const h = parseFloat(w.hours);
+            total += Math.floor(h);
+        });
+        const halves = items.filter(w =>
+            Math.abs(parseFloat(w.hours) % 1 - 0.5) < 0.01 &&
+            w.splitType === 'alternating'
+        );
+        total += Math.ceil(halves.length / 2); // пари = 1 слот, непарна = 1 слот
     });
     return total;
 }
@@ -809,7 +818,12 @@ function calcPenalty(task, firstItem, d, s, tempSchedule, teacherDayCount, relax
     const maxStatus = task.items.reduce((max, it) => Math.max(max, getTeacherStatus(it.teacherId, d, s)), 0);
     if (maxStatus === 1) pen += relaxed ? 500 : 1500;
 
-    if (priority <= 2) {
+    // Парні чергування (один вчитель різні класи) дозволяємо на останній слот без штрафу
+    const isPairedExternal = task.type === 'paired_external';
+    if (isPairedExternal && s >= 6) {
+        // Без штрафу - навіть бонус щоб звільнити ранкові слоти
+        pen -= 100;
+    } else if (priority <= 2) {
         if (s === 6) pen += relaxed ? 50 : 100;
         if (s === 7) pen += relaxed ? 150 : 400;
     } else {
@@ -1551,8 +1565,7 @@ function renderSchedule() {
 
                 html += `
                     <td class="p-0 border-r border-gray-100 min-w-[40px]">
-                        <div contenteditable="true"
-                             onblur="updateManualLesson('${teacher.id}', ${dayIdx}, ${slotIdx}, this)"
+                        <div ${slotIdx !== 8 ? `contenteditable="true" onblur="updateManualLesson('${teacher.id}', ${dayIdx}, ${slotIdx}, this)"` : ''}
                              class="min-h-[40px] flex items-center justify-center outline-none focus:bg-yellow-50 transition-colors">
                             ${cellContent}
                         </div>
