@@ -323,6 +323,29 @@ async function generateSchedule() {
     hideLoader();
 
     state.schedule = bestAttempt.schedule;
+    // 1. Спочатку піднімаємо важливі предмети в ранні слоти
+    promoteEarlySlots(state.schedule);
+    
+    // 2. Потім закриваємо вікна в класах (максимум 5 спроб)
+    let gapsFixed = false;
+    for (let attempt = 0; attempt < 5; attempt++) {
+        const fixed = fixClassGaps(state.schedule);
+        if (!fixed) break;
+        gapsFixed = true;
+    }
+    if (gapsFixed) {
+        // Після закриття вікон — знову піднімаємо, бо могли з'явитись нові можливості
+        promoteEarlySlots(state.schedule);
+        console.log("✅ Вікна в класах виправлені");
+    }
+    
+    // 3. Фінальне сортування розкладу для гарного відображення
+    state.schedule.sort((a, b) => {
+        if (a.day !== b.day) return a.day - b.day;
+        if (a.classId !== b.classId) return a.classId.localeCompare(b.classId);
+        return a.slot - b.slot;
+    });
+    
     saveData();
     renderSchedule();
 
@@ -448,6 +471,43 @@ function countTeacherAvailableDays(teacherId) {
         if (hasSlot) days++;
     }
     return days;
+}
+
+// =============================================================
+// ФУНКЦІЯ ДЛЯ ВЧИТЕЛІВ З КРИТИЧНИМ ДЕФІЦИТОМ ДНІВ
+// =============================================================
+function getTeacherCriticalDays(teacherId) {
+    const availableDays = getTeacherAvailableDaysList(teacherId);
+    if (availableDays.length <= 2) {
+        return availableDays;  // Повертаємо масив днів, коли вчитель може працювати
+    }
+    return null;
+}
+
+function tryForcePlaceOnAvailableDay(task, firstItem, tempSchedule, teacherDayCount) {
+    const criticalDays = getTeacherCriticalDays(firstItem.teacherId);
+    if (!criticalDays) return false;
+    
+    // Перемішуємо дні для різноманітності
+    const shuffledDays = [...criticalDays].sort(() => Math.random() - 0.5);
+    
+    for (const d of shuffledDays) {
+        for (let s = 1; s <= 7; s++) {
+            if (tempSchedule.some(ls => ls.day === d && ls.slot === s && ls.classId === firstItem.classId)) continue;
+            if (task.items.some(it => tempSchedule.some(ls => ls.day === d && ls.slot === s && ls.teacherId === it.teacherId))) continue;
+            if (task.items.some(it => getTeacherStatus(it.teacherId, d, s) === 2)) continue;
+            
+            // Менший штраф для цих вчителів
+            let pen = calcPenalty(task, firstItem, d, s, tempSchedule, teacherDayCount, true);
+            pen -= 500;  // Бонус за використання доступного дня
+            
+            if (pen < 10000) {  // Якщо не катастрофічно
+                commitTask(task, d, s, tempSchedule, teacherDayCount);
+                return true;
+            }
+        }
+    }
+    return false;
 }
 
 function getTeacherAvailableDaysList(teacherId) {
@@ -758,6 +818,22 @@ function runSingleGeneration() {
                     if (!placed) pendingTasks.push(task);
                 }
             }
+
+            // Спеціальний fallback для вчителів з 2 доступними днями
+            const criticalTasks = pendingTasks.filter(task => {
+                const item = task.items[0];
+                const days = getTeacherAvailableDaysList(item.teacherId);
+                return days.length <= 2;
+            });
+            
+            for (const task of criticalTasks) {
+                const item = task.items[0];
+                const placed = tryForcePlaceOnAvailableDay(task, item, tempSchedule, teacherDayCount);
+                if (placed) {
+                    const idx = pendingTasks.indexOf(task);
+                    if (idx !== -1) pendingTasks.splice(idx, 1);
+                }
+            }
             
             // СПРОБА 2: Звичайний fallback
             pendingTasks.forEach(task => {
@@ -867,11 +943,16 @@ function calcPenalty(task, firstItem, d, s, tempSchedule, teacherDayCount, relax
     if (isPairedExternal && s >= 6) {
         // Без штрафу - навіть бонус щоб звільнити ранкові слоти
         pen -= 100;
-    } else if (priority <= 2) {
-        if (s === 6) pen += relaxed ? 50 : 100;
-        if (s === 7) pen += relaxed ? 150 : 400;
-    } else {
-        if (s >= 6) pen -= 200;
+    } else if (priority === 1) {  // Математика, мови, фізика, хімія, англійська
+        if (s === 4) pen += relaxed ? 30 : 60;
+        if (s === 5) pen += relaxed ? 80 : 180;
+        if (s === 6) pen += relaxed ? 150 : 350;
+        if (s === 7) pen += relaxed ? 300 : 700;
+    } else if (priority === 2) {  // Література, історія, біологія, географія
+        if (s === 6) pen += relaxed ? 50 : 120;
+        if (s === 7) pen += relaxed ? 120 : 300;
+    } else {  // Фізкультура, технології, мистецтво
+        if (s >= 6) pen -= 200;  // Їх можна ставити пізніше
     }
 
     const myRoomType = getRoomType(firstItem.subject);
@@ -954,7 +1035,82 @@ function calcPenalty(task, firstItem, d, s, tempSchedule, teacherDayCount, relax
         else if (teacherCountToday >= 5) pen += 400;
     }
 
+    // Штраф за створення вікна в класі
+    const classLessonsAfter = [...tempSchedule.filter(ls => 
+        ls.day === d && ls.classId === firstItem.classId && ls.slot >= 1 && ls.slot <= 7
+    ), { slot: s }].sort((a, b) => a.slot - b.slot);
+    
+    // Перевіряємо, чи новий урок створює вікно
+    let createsGap = false;
+    for (let i = 1; i < classLessonsAfter.length; i++) {
+        const gap = classLessonsAfter[i].slot - classLessonsAfter[i-1].slot - 1;
+        if (gap > 0) {
+            createsGap = true;
+            // Штраф залежить від розміру вікна
+            if (gap === 1) pen += relaxed ? 300 : 800;
+            else if (gap === 2) pen += relaxed ? 800 : 2000;
+            else pen += relaxed ? 2000 : 5000;
+            break;
+        }
+    }
+    
+    // Додатковий штраф, якщо урок не перший і не після останнього
+    if (classLessonsAfter.length > 1) {
+        const lastSlot = Math.max(...classLessonsAfter.map(l => l.slot));
+        if (s !== lastSlot && !createsGap) {
+            // Урок вставлений в середину, але не створює вікно (це добре)
+            pen -= 100;
+        }
+    }
+
     return pen;
+}
+
+// =============================================================
+// ПОСТ-ОБРОБКА: Підняття важливих предметів в ранні слоти
+// =============================================================
+function promoteEarlySlots(schedule) {
+    let changed = false;
+    
+    for (let i = 0; i < schedule.length; i++) {
+        const lesson = schedule[i];
+        if (lesson.isManual) continue;
+        
+        // Перевіряємо, чи це важливий предмет (пріоритет 1)
+        const priority = getPriority(lesson.subject);
+        if (priority !== 1) continue;
+        
+        // Якщо урок стоїть пізніше 4-го слота
+        if (lesson.slot > 4) {
+            // Шукаємо більш ранній вільний слот в той самий день
+            for (let newSlot = 1; newSlot < lesson.slot; newSlot++) {
+                const classBusy = schedule.some(ls => 
+                    ls.day === lesson.day && ls.slot === newSlot && ls.classId === lesson.classId
+                );
+                const teacherBusy = schedule.some(ls => 
+                    ls.day === lesson.day && ls.slot === newSlot && ls.teacherId === lesson.teacherId
+                );
+                const isRed = getTeacherStatus(lesson.teacherId, lesson.day, newSlot) === 2;
+                
+                if (!classBusy && !teacherBusy && !isRed) {
+                    // Переміщуємо
+                    lesson.slot = newSlot;
+                    changed = true;
+                    break;
+                }
+            }
+        }
+    }
+    
+    // Після переміщень — сортуємо за слотами
+    if (changed) {
+        schedule.sort((a, b) => {
+            if (a.day !== b.day) return a.day - b.day;
+            return a.slot - b.slot;
+        });
+    }
+    
+    return changed;
 }
 
 // =============================================================
@@ -1369,6 +1525,56 @@ function getPriority(subjectName) {
 }
 
 // =============================================================
+// ЗАКРИТТЯ ВІКОН У КЛАСАХ (після генерації)
+// =============================================================
+function fixClassGaps(schedule) {
+    let changed = false;
+    
+    for (let classId of [...new Set(schedule.map(ls => ls.classId))]) {
+        const gaps = getClassGaps(classId, schedule);
+        
+        for (const gap of gaps) {
+            if (gap.size > 1) continue; // Великі вікна важко закрити
+            
+            const gapSlot = gap.from;
+            
+            for (let lesson of schedule) {
+                if (lesson.classId !== classId) continue;
+                if (lesson.day === gap.day) continue;
+                if (lesson.isManual) continue;
+                
+                // Перевіряємо, чи можна перемістити цей урок у вікно
+                const teacherFree = !schedule.some(ls =>
+                    ls.day === gap.day && ls.slot === gapSlot && ls.teacherId === lesson.teacherId
+                );
+                const notRed = getTeacherStatus(lesson.teacherId, gap.day, gapSlot) !== 2;
+                const classFree = !schedule.some(ls =>
+                    ls.day === gap.day && ls.slot === gapSlot && ls.classId === classId
+                );
+                
+                if (teacherFree && notRed && classFree) {
+                    // Переміщуємо
+                    const idx = schedule.indexOf(lesson);
+                    if (idx !== -1) {
+                        schedule.splice(idx, 1);
+                        schedule.push({
+                            ...lesson,
+                            id: 'sch_fixgap_' + Date.now() + Math.random(),
+                            day: gap.day,
+                            slot: gapSlot
+                        });
+                        changed = true;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    
+    return changed;
+}
+
+// =============================================================
 // ЗВІТ ПІСЛЯ ГЕНЕРАЦІЇ
 // =============================================================
 function showGenerationReport(errors, unpairedAlternating, overflowTasks, attempts, time) {
@@ -1468,6 +1674,56 @@ function showGenerationReport(errors, unpairedAlternating, overflowTasks, attemp
 
     reportHtml += `</div>`;
     output.insertAdjacentHTML('afterbegin', reportHtml);
+}
+
+// =============================================================
+// ПЕРЕВІРКА ВІКОН У КЛАСІ
+// =============================================================
+function getClassGaps(classId, schedule) {
+    const gaps = [];
+    for (let day = 0; day < 5; day++) {
+        const lessons = schedule
+            .filter(ls => ls.day === day && ls.classId === classId && ls.slot >= 1 && ls.slot <= 7)
+            .sort((a, b) => a.slot - b.slot);
+        
+        if (lessons.length === 0) continue;
+        
+        // Перший урок не на 1-й слот = вікно на початку
+        if (lessons[0].slot > 1) {
+            gaps.push({ day, type: 'start', from: 1, to: lessons[0].slot - 1 });
+        }
+        
+        // Вікна між уроками
+        for (let i = 1; i < lessons.length; i++) {
+            const gap = lessons[i].slot - lessons[i-1].slot - 1;
+            if (gap > 0) {
+                gaps.push({ 
+                    day, 
+                    type: 'middle', 
+                    from: lessons[i-1].slot + 1, 
+                    to: lessons[i].slot - 1,
+                    size: gap 
+                });
+            }
+        }
+        
+        // Вікно в кінці (якщо останній урок не 7)
+        if (lessons[lessons.length - 1].slot < 7) {
+            gaps.push({ 
+                day, 
+                type: 'end', 
+                from: lessons[lessons.length - 1].slot + 1, 
+                to: 7,
+                size: 7 - lessons[lessons.length - 1].slot
+            });
+        }
+    }
+    return gaps;
+}
+
+function hasLargeGaps(classId, schedule, maxAllowedGap = 1) {
+    const gaps = getClassGaps(classId, schedule);
+    return gaps.some(g => g.size > maxAllowedGap);
 }
 
 function addUnpairedToSlot(idx, slot) {
