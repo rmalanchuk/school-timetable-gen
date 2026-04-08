@@ -790,7 +790,7 @@ function runSingleGeneration() {
                 }
             });
         }
-    }
+    })
 
     return { 
         schedule: tempSchedule, 
