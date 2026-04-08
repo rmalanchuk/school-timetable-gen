@@ -345,6 +345,140 @@ async function generateSchedule() {
         if (a.classId !== b.classId) return a.classId.localeCompare(b.classId);
         return a.slot - b.slot;
     });
+
+    // =============================================================
+    // ЖОРСТКА ПОСТ-ОБРОБКА (виправляє порушення без перегенерації)
+    // =============================================================
+    function enforceHardConstraints(schedule) {
+        let changed = false;
+        
+        // 1. Видалити математику/фізику з 6-7 уроків
+        for (let lesson of schedule) {
+            const priority = getPriority(lesson.subject);
+            if (priority === 1 && (lesson.slot === 6 || lesson.slot === 7)) {
+                // Шукаємо більш ранній вільний слот в той самий день
+                for (let newSlot = 1; newSlot <= 5; newSlot++) {
+                    const classFree = !schedule.some(ls => 
+                        ls.day === lesson.day && ls.slot === newSlot && ls.classId === lesson.classId
+                    );
+                    const teacherFree = !schedule.some(ls => 
+                        ls.day === lesson.day && ls.slot === newSlot && ls.teacherId === lesson.teacherId
+                    );
+                    if (classFree && teacherFree) {
+                        lesson.slot = newSlot;
+                        changed = true;
+                        break;
+                    }
+                }
+            }
+        }
+        
+        // 2. Видалити дублікати однакових предметів в один день для одного класу
+        const toRemove = [];
+        for (let i = 0; i < schedule.length; i++) {
+            for (let j = i + 1; j < schedule.length; j++) {
+                const a = schedule[i];
+                const b = schedule[j];
+                if (a.classId === b.classId && a.day === b.day && a.subject === b.subject && !a.isManual && !b.isManual) {
+                    // Залишаємо один, другий помічаємо на видалення
+                    toRemove.push(b);
+                }
+            }
+        }
+        if (toRemove.length > 0) {
+            schedule = schedule.filter(ls => !toRemove.includes(ls));
+            changed = true;
+        }
+        
+        // 3. Для вчителів з червоними днями — перемістити уроки
+        for (let lesson of schedule) {
+            const status = getTeacherStatus(lesson.teacherId, lesson.day, lesson.slot);
+            if (status === 2) { // Червоний день
+                // Шукаємо інший день, де вчитель доступний
+                for (let newDay = 0; newDay < 5; newDay++) {
+                    if (getTeacherStatus(lesson.teacherId, newDay, lesson.slot) === 2) continue;
+                    const classFree = !schedule.some(ls => 
+                        ls.day === newDay && ls.slot === lesson.slot && ls.classId === lesson.classId
+                    );
+                    if (classFree) {
+                        lesson.day = newDay;
+                        changed = true;
+                        break;
+                    }
+                }
+            }
+        }
+        
+        // 4. Для Голдіна — тільки Вт (1) і Чт (3)
+        const goldinId = state.teachers.find(t => t.name.includes('Голдін'))?.id;
+        if (goldinId) {
+            for (let lesson of schedule) {
+                if (lesson.teacherId === goldinId && lesson.day !== 1 && lesson.day !== 3) {
+                    for (let newDay of [1, 3]) {
+                        const classFree = !schedule.some(ls => 
+                            ls.day === newDay && ls.slot === lesson.slot && ls.classId === lesson.classId
+                        );
+                        if (classFree) {
+                            lesson.day = newDay;
+                            changed = true;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        
+        // 5. Для Липницької — не більше 1 уроку в день для одного класу
+        const lipnytskaId = state.teachers.find(t => t.name.includes('Липницька'))?.id;
+        if (lipnytskaId) {
+            for (let day = 0; day < 5; day++) {
+                const lessonsThatDay = schedule.filter(ls => 
+                    ls.teacherId === lipnytskaId && ls.day === day
+                );
+                const byClass = {};
+                for (let lesson of lessonsThatDay) {
+                    if (!byClass[lesson.classId]) byClass[lesson.classId] = [];
+                    byClass[lesson.classId].push(lesson);
+                }
+                for (let classId in byClass) {
+                    if (byClass[classId].length > 1) {
+                        // Залишаємо один, решта шукають інший день
+                        const toMove = byClass[classId].slice(1);
+                        for (let lesson of toMove) {
+                            for (let newDay = 0; newDay < 5; newDay++) {
+                                if (newDay === day) continue;
+                                const classFree = !schedule.some(ls => 
+                                    ls.day === newDay && ls.slot === lesson.slot && ls.classId === lesson.classId
+                                );
+                                if (classFree && getTeacherStatus(lipnytskaId, newDay, lesson.slot) !== 2) {
+                                    lesson.day = newDay;
+                                    changed = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Сортуємо після змін
+        if (changed) {
+            schedule.sort((a, b) => {
+                if (a.day !== b.day) return a.day - b.day;
+                if (a.classId !== b.classId) return a.classId.localeCompare(b.classId);
+                return a.slot - b.slot;
+            });
+        }
+        
+        return { schedule, changed };
+    }
+
+    const result = enforceHardConstraints(state.schedule);
+    state.schedule = result.schedule;
+    if (result.changed) {
+        console.log("✅ Жорсткі обмеження застосовані");
+    }
     
     saveData();
     renderSchedule();
