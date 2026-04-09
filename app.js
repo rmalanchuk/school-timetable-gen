@@ -662,15 +662,19 @@ function isValidPlacement(task, first, priority, d, s, schedule) {
     // 3. Червона зона
     if (task.items.some(it => getTeacherStatus(it.teacherId, d, s) === 2)) return false;
 
-    // 4. NO-GAP: перший урок класу в цей день має бути на слоті 1,
-    //    кожен наступний — рівно +1 від попереднього
+    // 4. NO-GAP: клас не може мати вікно між уроками.
+    //    Якщо клас вже має уроки в день d — новий урок не може
+    //    залишати розрив (s > max+1 або s < min-1).
+    //    Якщо клас ще порожній у цей день — будь-який слот 1-7 ok.
     const classSlots = schedule
         .filter(ls => ls.day === d && ls.classId === first.classId && ls.slot >= 1 && ls.slot <= 7)
-        .map(ls => ls.slot).sort((a, b) => a - b);
-    if (classSlots.length === 0) {
-        if (s !== 1) return false;
-    } else {
-        if (s !== Math.max(...classSlots) + 1) return false;
+        .map(ls => ls.slot);
+    if (classSlots.length > 0) {
+        const maxSlot = Math.max(...classSlots);
+        const minSlot = Math.min(...classSlots);
+        if (s > maxSlot + 1) return false;  // розрив після останнього
+        if (s < minSlot - 1) return false;  // розрив перед першим
+        // s == вже зайнятий — покривається правилом 1
     }
 
     // 5. Предмет пріоритету 1 — max 1 раз на день (крім примусових пар)
@@ -785,6 +789,14 @@ function scoreSlot(task, d, s, schedule) {
         if (laborToday.length === 1) {
             score += Math.abs(laborToday[0].slot - s) === 1 ? -400 : 200;
         } else if (laborToday.length > 1) score += 8000;
+    }
+
+    // Якщо клас порожній у цей день — заохочуємо слот 1 (але не жорстко)
+    const classSlotsToday = schedule
+        .filter(ls => ls.day === d && ls.classId === first.classId && ls.slot >= 1 && ls.slot <= 7)
+        .map(ls => ls.slot);
+    if (classSlotsToday.length === 0 && s > 1) {
+        score += (s - 1) * 200; // м'який штраф за непочаток з 1
     }
 
     // Мікро-рандом для різноманіття між спробами
