@@ -662,7 +662,20 @@ function tryEvacuate(lesson, blockedDay, blockedSlot, schedule, depth) {
         const classConflict   = schedule.find(ls => ls.day === d && ls.slot === s && ls.classId === lesson.classId);
 
         if (!teacherConflict && !classConflict) {
-            // Слот вільний — розміщуємо
+            // Слот вільний — перевіряємо чи не порушуємо prio-1 на пізніх слотах
+            if (getPriority(lesson.subject) === 1 && s >= 6) {
+                // Не евакуюємо пріоритет 1 на слоти 6-7 якщо є раніші варіанти
+                // (просто пропускаємо цей слот, продовжуємо пошук)
+                continue;
+            }
+            // Перевіряємо вікно вчителя при евакуації
+            const teacherSlots = schedule
+                .filter(ls => ls.day === d && ls.teacherId === lesson.teacherId && ls.slot >= 1 && ls.slot <= 7)
+                .map(ls => ls.slot);
+            if (teacherSlots.length > 0) {
+                const minGap = Math.min(...teacherSlots.map(ts => Math.abs(ts - s)));
+                if (minGap > 2 && getPriority(lesson.subject) <= 2) continue; // вікно > 1 — пропускаємо
+            }
             const movedLesson = { ...lesson, id: 'e_' + Date.now() + Math.random(), day: d, slot: s };
             schedule.push(movedLesson);
             return [{ original: lesson, moved: movedLesson, removedIdx: idx }];
@@ -835,7 +848,9 @@ function isHardValid(task, first, d, s, schedule) {
     if (task.items.some(it => getTeacherStatus(it.teacherId, d, s) === 2)) return false;
 
     // 4. NO-GAP: клас не може мати вікно між уроками
-    const classSlots = schedule.filter(ls => ls.day === d && ls.classId === first.classId && ls.slot >= 1 && ls.slot <= 7).map(ls => ls.slot);
+    const classSlots = schedule
+        .filter(ls => ls.day === d && ls.classId === first.classId && ls.slot >= 1 && ls.slot <= 7)
+        .map(ls => ls.slot);
     if (classSlots.length > 0) {
         const maxS = Math.max(...classSlots);
         const minS = Math.min(...classSlots);
@@ -843,31 +858,79 @@ function isHardValid(task, first, d, s, schedule) {
         if (s < minS - 1) return false;
     }
 
-    // 5. Предмет пріоритету 1 — не більше 1 на день (крім примусових пар)
+    // 5. Пріоритет 1 — max 1 раз на день (крім примусових пар)
     if (task.priority === 1) {
-        const existing = schedule.filter(ls => ls.day === d && ls.classId === first.classId && ls.subject === first.subject);
+        const existing = schedule.filter(ls =>
+            ls.day === d && ls.classId === first.classId && ls.subject === first.subject
+        );
         if (existing.length > 0) {
             const freeDays = countFreeDays(first.teacherId);
-            const totalNeeded = state.workload.filter(w => w.classId === first.classId && w.subject === first.subject).reduce((sum, w) => sum + Math.ceil(parseFloat(w.hours)), 0);
+            const totalNeeded = state.workload
+                .filter(w => w.classId === first.classId && w.subject === first.subject)
+                .reduce((sum, w) => sum + Math.ceil(parseFloat(w.hours)), 0);
             if (totalNeeded <= freeDays) return false;
             if (!existing.some(ls => Math.abs(ls.slot - s) === 1)) return false;
         }
     }
 
-    // 6. Кімнатні конфлікти (gym, computer — hard; chemistry, physics — теж hard)
+    // 6. Пріоритет 1 на слоті 6-7: тільки якщо НЕ існує жодного вільного слоту 1-5
+    //    для цього вчителя в цей день (з урахуванням зайнятості класу і вчителя)
+    if (task.priority === 1 && s >= 6) {
+        for (let earlyS = 1; earlyS <= 5; earlyS++) {
+            const teacherFreeEarly = !schedule.some(ls => ls.day === d && ls.slot === earlyS &&
+                task.items.some(it => it.teacherId === ls.teacherId));
+            const classFreeEarly = !schedule.some(ls =>
+                ls.day === d && ls.slot === earlyS && ls.classId === first.classId);
+            const notRedEarly = !task.items.some(it => getTeacherStatus(it.teacherId, d, earlyS) === 2);
+            // NO-GAP перевірка для раннього слоту
+            const classSlots2 = schedule.filter(ls =>
+                ls.day === d && ls.classId === first.classId && ls.slot >= 1 && ls.slot <= 7
+            ).map(ls => ls.slot);
+            let noGapOk = true;
+            if (classSlots2.length > 0) {
+                const maxS2 = Math.max(...classSlots2);
+                const minS2 = Math.min(...classSlots2);
+                if (earlyS > maxS2 + 1 || earlyS < minS2 - 1) noGapOk = false;
+            }
+            if (teacherFreeEarly && classFreeEarly && notRedEarly && noGapOk) {
+                return false; // є ранній слот — не можна ставити на 6-7
+            }
+        }
+    }
+
+    // 7. Вікно вчителя > 1: якщо у вчителя вже є уроки в цей день,
+    //    новий урок не може залишати вікно більше 1 слоту
+    //    (вікно = різниця між слотами > 1)
+    //    Виняток: якщо це єдиний можливий варіант (перевіряється через score)
+    if (task.priority <= 2) { // тільки для важливих предметів
+        const teacherSlotsToday = schedule
+            .filter(ls => ls.day === d && ls.teacherId === first.teacherId && ls.slot >= 1 && ls.slot <= 7)
+            .map(ls => ls.slot);
+        if (teacherSlotsToday.length > 0) {
+            const maxT = Math.max(...teacherSlotsToday);
+            const minT = Math.min(...teacherSlotsToday);
+            // Не можна ставити якщо утвориться вікно > 1 урок
+            // Вікно між новим слотом і найближчим існуючим
+            const minGap = Math.min(...teacherSlotsToday.map(ts => Math.abs(ts - s)));
+            if (minGap > 2) return false; // вікно > 1 урок — заборона
+        }
+    }
+
+    // 8. Кімнатні конфлікти
     const roomType = getRoomType(first.subject);
     if (roomType) {
-        if (schedule.some(ls => ls.day === d && ls.slot === s && ls.classId !== first.classId && getRoomType(ls.subject) === roomType)) return false;
+        if (schedule.some(ls => ls.day === d && ls.slot === s && ls.classId !== first.classId &&
+            getRoomType(ls.subject) === roomType)) return false;
     }
-
-    // 7. Фізкультура одного класу — max 1 на день
     if (roomType === 'gym') {
-        if (schedule.some(ls => ls.day === d && ls.classId === first.classId && getRoomType(ls.subject) === 'gym')) return false;
+        if (schedule.some(ls => ls.day === d && ls.classId === first.classId &&
+            getRoomType(ls.subject) === 'gym')) return false;
     }
 
-    // 8. Труд/технологія — один кабінет
+    // 9. Труд/технологія — один кабінет
     if (isLaborSubject(first.subject)) {
-        if (schedule.some(ls => ls.day === d && ls.slot === s && ls.classId !== first.classId && isLaborSubject(ls.subject))) return false;
+        if (schedule.some(ls => ls.day === d && ls.slot === s && ls.classId !== first.classId &&
+            isLaborSubject(ls.subject))) return false;
     }
 
     return true;
@@ -880,56 +943,88 @@ function scoreSlot(task, first, d, s, schedule) {
     let score = 0;
     const priority = task.priority;
 
-    // Жовта зона
+    // Жовта зона вчителя
     const maxStatus = task.items.reduce((m, it) => Math.max(m, getTeacherStatus(it.teacherId, d, s)), 0);
-    if (maxStatus === 1) score += 1200;
+    if (maxStatus === 1) score += 1000;
 
-    // ПРІОРИТЕТ 1: намагаємось поставити на 1-4, максимум 5
-    // На 6-7 лише якщо нема вибору
+    // ── ПОЗИЦІЯ СЛОТУ залежно від пріоритету ──
     if (priority === 1) {
-        if (s === 5) score += 200;
-        if (s === 6) score += 2000;  // дуже небажано
-        if (s === 7) score += 5000;  // майже заборона
+        // Пріоритет 1: ідеально 1-4, допустимо 5, дуже погано 6-7
+        // (але 6-7 вже заблоковані через isHardValid якщо є рання альтернатива)
+        if (s <= 4) score += 0;
+        else if (s === 5) score += 150;
+        else if (s === 6) score += 1500;
+        else score += 4000;
     } else if (priority === 2) {
-        if (s === 6) score += 300;
-        if (s === 7) score += 800;
+        // Пріоритет 2: бажано 1-5, небажано 6-7
+        if (s <= 5) score += 0;
+        else if (s === 6) score += 400;
+        else score += 900;
     } else {
-        // Пріоритет 3 (фізкульт, мистецтво) — краще пізніше, звільняємо ранні слоти
-        score += (5 - s) * 250; // слот 1 = +1000, слот 5 = 0, слот 6 = -250
+        // Пріоритет 3: заохочуємо пізніші слоти, щоб звільнити ранні для важливих
+        score += Math.max(0, (5 - s)) * 300; // слот 1 = +1200, слот 5+ = 0
     }
 
-    // Компактність вчителя (мінімізуємо вікна)
-    const teacherToday = schedule.filter(ls => ls.day === d && ls.teacherId === first.teacherId && ls.slot >= 1 && ls.slot <= 7);
-    if (teacherToday.length > 0) {
-        const dists = teacherToday.map(ls => Math.abs(ls.slot - s));
-        const minDist = Math.min(...dists);
-        if (minDist === 1) score -= 200;
-        else if (minDist === 2) score += 500;
-        else score += minDist * 800; // великі вікна — дуже погано
+    // ── ВІКНА ВЧИТЕЛЯ ──
+    // Штраф пропорційний розміру вікна між існуючими уроками і новим
+    const teacherSlotsToday = schedule
+        .filter(ls => ls.day === d && ls.teacherId === first.teacherId && ls.slot >= 1 && ls.slot <= 7)
+        .map(ls => ls.slot);
+    if (teacherSlotsToday.length > 0) {
+        const minGap = Math.min(...teacherSlotsToday.map(ts => Math.abs(ts - s)));
+        if (minGap === 0) score += 0;       // той самий слот (буде заблоковано раніше)
+        else if (minGap === 1) score -= 150; // сусідній — бонус
+        else if (minGap === 2) score += 300; // вікно в 1 урок — терпимо
+        else score += minGap * 600;          // велике вікно — дуже погано
     } else {
-        score += (s - 1) * 100; // перший урок вчителя — ближче до початку
+        // Перший урок вчителя в цей день — тягнемо ближче до початку
+        score += (s - 1) * 80;
     }
 
-    // Баланс по днях
-    const dayCount = schedule.filter(ls => ls.day === d && ls.teacherId === first.teacherId && ls.slot >= 1 && ls.slot <= 7).length;
-    if (dayCount >= 6) score += 1500;
-    else if (dayCount >= 5) score += 500;
+    // ── БАЛАНС ВЧИТЕЛЯ ПО ДНЯХ ──
+    const dayCount = schedule.filter(ls =>
+        ls.day === d && ls.teacherId === first.teacherId && ls.slot >= 1 && ls.slot <= 7
+    ).length;
+    if (dayCount >= 6) score += 1200;
+    else if (dayCount >= 5) score += 400;
 
-    // Дублювання предмета в день (для пріоритету 2-3)
-    if (priority >= 2) {
-        const sameToday = schedule.filter(ls => ls.day === d && ls.classId === first.classId && ls.subject === first.subject);
-        if (sameToday.length > 0) {
-            const isAdj = sameToday.some(ls => Math.abs(ls.slot - s) === 1);
-            score += isAdj ? 300 : 5000;
+    // ── ДУБЛЮВАННЯ ПРЕДМЕТА В ДЕНЬ ──
+    // Для пріоритету 1 — вже є hard constraint, тут додатковий soft
+    // Для пріоритету 2-3 — штрафуємо (крім підряд)
+    const sameSubjToday = schedule.filter(ls =>
+        ls.day === d && ls.classId === first.classId && ls.subject === first.subject
+    );
+    if (sameSubjToday.length > 0) {
+        const isAdj = sameSubjToday.some(ls => Math.abs(ls.slot - s) === 1);
+        if (priority === 1) {
+            score += isAdj ? 200 : 3000;
+        } else {
+            score += isAdj ? 250 : 4000;
         }
     }
 
-    // Якщо клас ще порожній — м'яко заохочуємо слот 1
-    const classSlotsToday = schedule.filter(ls => ls.day === d && ls.classId === first.classId && ls.slot >= 1 && ls.slot <= 7);
-    if (classSlotsToday.length === 0 && s > 1) score += (s - 1) * 150;
+    // ── КЛАС ПОРОЖНІЙ В ЦЕЙ ДЕНЬ ──
+    // М'яко заохочуємо починати з слоту 1
+    const classSlotsToday = schedule.filter(ls =>
+        ls.day === d && ls.classId === first.classId && ls.slot >= 1 && ls.slot <= 7
+    );
+    if (classSlotsToday.length === 0 && s > 1) {
+        score += (s - 1) * 120;
+    }
 
-    // Мікро-рандом
-    score += Math.random() * 10;
+    // ── ПРІОРИТЕТ 1 ПОРУЧ З ПРІОРИТЕТОМ 1 ТОГО Ж КЛАСУ ──
+    // Якщо в класу вже є предмет пріоритету 1 на сусідньому слоті —
+    // намагаємось рознести їх
+    if (priority === 1) {
+        const adjHighPrio = schedule.filter(ls =>
+            ls.day === d && ls.classId === first.classId &&
+            Math.abs(ls.slot - s) === 1 && getPriority(ls.subject) === 1
+        );
+        score += adjHighPrio.length * 200;
+    }
+
+    // Мікро-рандом для різноманіття між рестартами
+    score += Math.random() * 8;
 
     return score;
 }
