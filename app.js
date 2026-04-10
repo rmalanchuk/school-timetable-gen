@@ -724,23 +724,27 @@ function tryEvacuate(lesson, blockedDay, blockedSlot, schedule, depth) {
         }
     }
 
-    // Не вдалось — повертаємо lesson на місце
-    schedule.splice(idx, 0, lesson);
+    // Не вдалось — повертаємо lesson на місце (якщо його там ще немає)
+    const stillAbsent = !schedule.some(ls => ls === lesson || ls.id === lesson.id);
+    if (stillAbsent) schedule.splice(idx, 0, lesson);
     return null;
 }
 
-// Відкат евакуації: прибираємо moved версії і повертаємо originals
+// Відкат евакуації: видаляємо всі moved копії і повертаємо originals
 function rollbackEvacuation(changes, schedule) {
-    // Видаляємо всі moved уроки
-    for (const { moved } of changes) {
-        const i = schedule.indexOf(moved);
-        if (i !== -1) schedule.splice(i, 1);
+    // Крок 1: Видаляємо всі moved уроки (шукаємо по id і по посиланню)
+    const movedIds = new Set(changes.map(c => c.moved.id));
+    for (let i = schedule.length - 1; i >= 0; i--) {
+        if (movedIds.has(schedule[i].id) || changes.some(c => c.moved === schedule[i])) {
+            schedule.splice(i, 1);
+        }
     }
-    // Повертаємо всі originals (в зворотньому порядку для коректних індексів)
-    for (let i = changes.length - 1; i >= 0; i--) {
-        const { original, removedIdx } = changes[i];
-        // Просто push — порядок не критичний для логіки
-        schedule.push(original);
+    // Крок 2: Повертаємо всі originals (перевіряємо що їх ще немає)
+    for (const { original } of changes) {
+        const alreadyThere = schedule.some(ls =>
+            ls.id === original.id || ls === original
+        );
+        if (!alreadyThere) schedule.push(original);
     }
 }
 
@@ -902,19 +906,35 @@ function isHardValid(task, first, d, s, schedule) {
         if (s < minS - 1) return false;
     }
 
-    // 5. Пріоритет 1 — max 1 раз на день (крім примусових пар)
+    // 5. Пріоритет 1 — max 1 раз на день (крім вимушених пар)
+    //    Вимушена пара: предмет потрібен більше разів ніж є вільних днів
     if (task.priority === 1) {
         const existing = schedule.filter(ls =>
             ls.day === d && ls.classId === first.classId && ls.subject === first.subject
         );
         if (existing.length > 0) {
-            const freeDays = countFreeDays(first.teacherId);
+            // Скільки разів цей предмет потрібен для цього класу
             const totalNeeded = state.workload
-                .filter(w => w.classId === first.classId && w.subject === first.subject)
+                .filter(w => w.classId === first.classId &&
+                    w.subject.toLowerCase() === first.subject.toLowerCase())
                 .reduce((sum, w) => sum + Math.ceil(parseFloat(w.hours)), 0);
+            // Скільки днів доступно для цього вчителя
+            const freeDays = countFreeDays(first.teacherId);
+            // Якщо можна розкласти по різних днях — дублювання заборонено
             if (totalNeeded <= freeDays) return false;
+            // Якщо пара вимушена — лише якщо йдуть підряд
             if (!existing.some(ls => Math.abs(ls.slot - s) === 1)) return false;
+            // І не більше 2 уроків цього предмета в день
+            if (existing.length >= 2) return false;
         }
+    }
+
+    // 5b. Будь-який предмет — не більше 2 однакових в день для одного класу
+    {
+        const sameInDay = schedule.filter(ls =>
+            ls.day === d && ls.classId === first.classId && ls.subject === first.subject
+        ).length;
+        if (sameInDay >= 2) return false;
     }
 
     // 6. Пріоритет 1 на слоті 6-7: тільки якщо НЕ існує жодного вільного слоту 1-5
@@ -942,18 +962,26 @@ function isHardValid(task, first, d, s, schedule) {
         }
     }
 
-    // 7. Вікно вчителя: якщо у вчителя вже є уроки в цей день,
-    //    перевіряємо чи новий слот не залишає вікно > 1 урок.
-    //    ВАЖЛИВО: перевіряємо для всіх предметів (не лише prio 1-2),
-    //    але з relaxed для prio 3 (дозволяємо вікно до 2).
+    // 7. Вікно вчителя:
+    //    Правило: максимум 1 вікно (пропуск) по 1 уроку на день для вчителя.
+    //    Тобто якщо після додавання нового слоту в розкладі вчителя
+    //    буде більше ніж 1 "пропуск" або хоча б 1 пропуск > 1 уроку → заборона.
     {
         const teacherSlotsToday = schedule
             .filter(ls => ls.day === d && ls.teacherId === first.teacherId && ls.slot >= 1 && ls.slot <= 7)
             .map(ls => ls.slot);
         if (teacherSlotsToday.length > 0) {
-            const minGap = Math.min(...teacherSlotsToday.map(ts => Math.abs(ts - s)));
-            const maxAllowedGap = task.priority <= 2 ? 2 : 3;
-            if (minGap > maxAllowedGap) return false;
+            // Симулюємо розклад після додавання нового слоту
+            const allSlots = [...teacherSlotsToday, s].sort((a, b) => a - b);
+            let gapCount = 0;
+            let hasLargeGap = false;
+            for (let i = 1; i < allSlots.length; i++) {
+                const gap = allSlots[i] - allSlots[i - 1] - 1; // кількість "пропущених" уроків
+                if (gap > 0) gapCount++;
+                if (gap > 1) hasLargeGap = true;
+            }
+            if (hasLargeGap) return false;      // вікно > 1 урок — заборона завжди
+            if (gapCount > 1) return false;     // більше 1 вікна на день — заборона
         }
     }
 
