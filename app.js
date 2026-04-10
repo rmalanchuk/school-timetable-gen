@@ -334,8 +334,36 @@ async function generateSchedule() {
         }
 
         // ФАЗА 2: Priority Swap
-        // Пріоритет 1 на пізніх слотах міняємо місцями з пріоритетом 2-3 на ранніх
         prioritySwapPass(schedule);
+
+        // ФАЗА 2.5: Знаходимо "погано розміщені" уроки пріоритету 1
+        // (на слотах 5-7 хоча є ранніші вільні) і повертаємо їх в repair
+        {
+            const toReplace = [];
+            for (const ls of [...schedule]) {
+                if (ls.isManual || getPriority(ls.subject) !== 1 || ls.slot < 5) continue;
+                let hasEarlier = false;
+                for (let es = 1; es < ls.slot && !hasEarlier; es++) {
+                    const tFree = !schedule.some(x => x !== ls && x.day === ls.day && x.slot === es && x.teacherId === ls.teacherId);
+                    const cFree = !schedule.some(x => x !== ls && x.day === ls.day && x.slot === es && x.classId === ls.classId);
+                    const notRed = getTeacherStatus(ls.teacherId, ls.day, es) !== 2;
+                    const csb = schedule.filter(x => x !== ls && x.day === ls.day && x.classId === ls.classId && x.slot >= 1 && x.slot <= 7).map(x => x.slot);
+                    let ngOk = csb.length === 0 || (es <= Math.max(...csb) + 1 && es >= Math.min(...csb) - 1);
+                    if (tFree && cFree && notRed && ngOk) hasEarlier = true;
+                }
+                if (hasEarlier) toReplace.push(ls);
+            }
+            for (const ls of toReplace) {
+                const idx = schedule.indexOf(ls);
+                if (idx !== -1) {
+                    schedule.splice(idx, 1);
+                    const origTask = tasks.find(t =>
+                        t.items.some(it => it.teacherId === ls.teacherId && it.classId === ls.classId && it.subject === ls.subject)
+                    );
+                    if (origTask && !unplacedTasks.includes(origTask)) unplacedTasks.push(origTask);
+                }
+            }
+        }
 
         // ФАЗА 3: Min-Conflicts Repair
         const stillUnplaced = [...unplacedTasks];
@@ -736,7 +764,9 @@ function buildTasks() {
         const frac = Math.round((h - whole) * 10) / 10;
         for (let i = 0; i < whole; i++)
             flatWorkload.push({ ...item, currentHours: 1, used: false });
-        if (Math.abs(frac - 0.5) < 0.01)
+        // Додаємо 0.5-годинний слот ЛИШЕ якщо splitType === 'alternating'
+        // і дробова частина справді 0.5
+        if (Math.abs(frac - 0.5) < 0.01 && item.splitType === 'alternating')
             flatWorkload.push({ ...item, currentHours: 0.5, used: false });
     });
 
@@ -844,6 +874,20 @@ function isHardValid(task, first, d, s, schedule) {
     // 2. Клас зайнятий
     if (schedule.some(ls => ls.day === d && ls.slot === s && ls.classId === first.classId)) return false;
 
+    // 2b. Для paired задач: перевіряємо чи всі items можуть бути в цей слот
+    //     (їх вчителі вільні і клас не конфліктує між items)
+    if (task.items.length > 1) {
+        // Перевіряємо попарно: кожен наступний item не конфліктує з попереднім
+        for (let i = 1; i < task.items.length; i++) {
+            const it = task.items[i];
+            // Вчитель item[i] зайнятий?
+            if (schedule.some(ls => ls.day === d && ls.slot === s && ls.teacherId === it.teacherId)) return false;
+            // Клас item[i] = клас item[0] (той самий клас) — вже перевірено вище
+            // Але перевіряємо red zone для кожного вчителя
+            if (getTeacherStatus(it.teacherId, d, s) === 2) return false;
+        }
+    }
+
     // 3. Червона зона вчителя
     if (task.items.some(it => getTeacherStatus(it.teacherId, d, s) === 2)) return false;
 
@@ -898,21 +942,18 @@ function isHardValid(task, first, d, s, schedule) {
         }
     }
 
-    // 7. Вікно вчителя > 1: якщо у вчителя вже є уроки в цей день,
-    //    новий урок не може залишати вікно більше 1 слоту
-    //    (вікно = різниця між слотами > 1)
-    //    Виняток: якщо це єдиний можливий варіант (перевіряється через score)
-    if (task.priority <= 2) { // тільки для важливих предметів
+    // 7. Вікно вчителя: якщо у вчителя вже є уроки в цей день,
+    //    перевіряємо чи новий слот не залишає вікно > 1 урок.
+    //    ВАЖЛИВО: перевіряємо для всіх предметів (не лише prio 1-2),
+    //    але з relaxed для prio 3 (дозволяємо вікно до 2).
+    {
         const teacherSlotsToday = schedule
             .filter(ls => ls.day === d && ls.teacherId === first.teacherId && ls.slot >= 1 && ls.slot <= 7)
             .map(ls => ls.slot);
         if (teacherSlotsToday.length > 0) {
-            const maxT = Math.max(...teacherSlotsToday);
-            const minT = Math.min(...teacherSlotsToday);
-            // Не можна ставити якщо утвориться вікно > 1 урок
-            // Вікно між новим слотом і найближчим існуючим
             const minGap = Math.min(...teacherSlotsToday.map(ts => Math.abs(ts - s)));
-            if (minGap > 2) return false; // вікно > 1 урок — заборона
+            const maxAllowedGap = task.priority <= 2 ? 2 : 3;
+            if (minGap > maxAllowedGap) return false;
         }
     }
 
