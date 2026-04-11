@@ -319,12 +319,14 @@ async function generateSchedule() {
 
         // Shuffle для різноманіття між рестартами
         shuffleWithSeed(tasks, restart);
-        // Але завжди: найбільш обмежені вчителі першими
+        // Сортування: найбільш обмежені вчителі першими, потім пріоритет предмету
         tasks.sort((a, b) => {
             const aFree = Math.min(...a.items.map(it => countFreeSlots(it.teacherId)));
             const bFree = Math.min(...b.items.map(it => countFreeSlots(it.teacherId)));
             if (aFree !== bFree) return aFree - bFree;
-            return a.priority - b.priority;
+            // Пріоритет 1 (важкі предмети) — обов'язково перед 2 і 3
+            if (a.priority !== b.priority) return a.priority - b.priority;
+            return 0;
         });
 
         const unplacedTasks = [];
@@ -1006,6 +1008,15 @@ function isHardValid(task, first, d, s, schedule) {
     // 3. Червона зона вчителя
     if (task.items.some(it => getTeacherStatus(it.teacherId, d, s) === 2)) return false;
 
+    // 3b. Початкові класи (1-4): максимум 4 уроки на день
+    {
+        const cls = state.classes.find(c => c.id === first.classId);
+        if (cls) {
+            const classNum = parseInt(cls.name);
+            if (classNum >= 1 && classNum <= 4 && s > 4) return false;
+        }
+    }
+
     // 4. NO-GAP: клас не може мати вікно між уроками
     // ВАЖЛИВО: використовуємо унікальні слоти — пара з 2 вчителів дає 2 записи
     // з однаковим slot, але займає 1 фізичний слот!
@@ -1050,28 +1061,27 @@ function isHardValid(task, first, d, s, schedule) {
         if (sameInDay >= 2) return false;
     }
 
-    // 6. Пріоритет 1 на слоті 6-7: тільки якщо НЕ існує жодного вільного слоту 1-5
-    //    для цього вчителя в цей день (з урахуванням зайнятості класу і вчителя)
-    if (task.priority === 1 && s >= 6) {
-        for (let earlyS = 1; earlyS <= 5; earlyS++) {
-            const teacherFreeEarly = !schedule.some(ls => ls.day === d && ls.slot === earlyS &&
+    // 6. Пріоритет 1: тільки якщо НЕ існує вільного слоту 1-4 для вчителя і класу.
+    //    Слот 5 допустимий лише якщо немає вільних 1-4.
+    //    Слоти 6-7 лише якщо немає вільних 1-5.
+    if (task.priority === 1 && s >= 5) {
+        const maxEarlyAllowed = s === 5 ? 4 : 5; // для слоту 5 шукаємо 1-4, для 6-7 шукаємо 1-5
+        const classSlotsCur = [...new Set(schedule
+            .filter(ls => ls.day === d && ls.classId === first.classId && ls.slot >= 1 && ls.slot <= 7)
+            .map(ls => ls.slot))];
+        for (let earlyS = 1; earlyS <= maxEarlyAllowed; earlyS++) {
+            const tFree = !schedule.some(ls => ls.day === d && ls.slot === earlyS &&
                 task.items.some(it => it.teacherId === ls.teacherId));
-            const classFreeEarly = !schedule.some(ls =>
-                ls.day === d && ls.slot === earlyS && ls.classId === first.classId);
-            const notRedEarly = !task.items.some(it => getTeacherStatus(it.teacherId, d, earlyS) === 2);
-            // NO-GAP перевірка для раннього слоту
-            const classSlots2 = schedule.filter(ls =>
-                ls.day === d && ls.classId === first.classId && ls.slot >= 1 && ls.slot <= 7
-            ).map(ls => ls.slot);
-            let noGapOk = true;
-            if (classSlots2.length > 0) {
-                const maxS2 = Math.max(...classSlots2);
-                const minS2 = Math.min(...classSlots2);
-                if (earlyS > maxS2 + 1 || earlyS < minS2 - 1) noGapOk = false;
+            const cFree = !schedule.some(ls => ls.day === d && ls.slot === earlyS &&
+                ls.classId === first.classId);
+            const notRed = !task.items.some(it => getTeacherStatus(it.teacherId, d, earlyS) === 2);
+            let ngOk = true;
+            if (classSlotsCur.length > 0) {
+                const maxS2 = Math.max(...classSlotsCur);
+                const minS2 = Math.min(...classSlotsCur);
+                if (earlyS > maxS2 + 1 || earlyS < minS2 - 1) ngOk = false;
             }
-            if (teacherFreeEarly && classFreeEarly && notRedEarly && noGapOk) {
-                return false; // є ранній слот — не можна ставити на 6-7
-            }
+            if (tFree && cFree && notRed && ngOk) return false;
         }
     }
 
@@ -1159,21 +1169,32 @@ function scoreSlot(task, first, d, s, schedule) {
     if (maxStatus === 1) score += 1000;
 
     // ── ПОЗИЦІЯ СЛОТУ залежно від пріоритету ──
+    // Початкові класи (1-4): всі предмети max слот 4 (вже в isHardValid)
+    {
+        const cls = state.classes.find(c => c.id === first.classId);
+        if (cls) {
+            const classNum = parseInt(cls.name);
+            if (classNum >= 1 && classNum <= 4) {
+                score += (s - 1) * 500; // дуже сильно тягнемо до слоту 1
+            }
+        }
+    }
+
     if (priority === 1) {
-        // Пріоритет 1: ідеально 1-4, допустимо 5, дуже погано 6-7
-        // (але 6-7 вже заблоковані через isHardValid якщо є рання альтернатива)
-        if (s <= 4) score += 0;
-        else if (s === 5) score += 150;
-        else if (s === 6) score += 1500;
-        else score += 4000;
+        // Ідеально 1-3, добре 4, допустимо 5, погано 6-7
+        if (s <= 3) score += 0;
+        else if (s === 4) score += 80;
+        else if (s === 5) score += 400;
+        else if (s === 6) score += 2500;
+        else score += 6000;
     } else if (priority === 2) {
-        // Пріоритет 2: бажано 1-5, небажано 6-7
-        if (s <= 5) score += 0;
-        else if (s === 6) score += 400;
-        else score += 900;
+        if (s <= 4) score += 0;
+        else if (s === 5) score += 100;
+        else if (s === 6) score += 500;
+        else score += 1200;
     } else {
-        // Пріоритет 3: заохочуємо пізніші слоти, щоб звільнити ранні для важливих
-        score += Math.max(0, (5 - s)) * 300; // слот 1 = +1200, слот 5+ = 0
+        // Пріоритет 3: активно штрафуємо за ранні слоти
+        score += Math.max(0, (6 - s)) * 350; // слот 1 = +1750, слот 6+ = 0
     }
 
     // ── ВІКНА ВЧИТЕЛЯ ──
