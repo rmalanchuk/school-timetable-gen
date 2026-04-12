@@ -473,7 +473,7 @@ function prioritySwapPass(schedule) {
     for (let pass = 0; pass < 15; pass++) {
         let improved = false;
 
-        // Всі уроки пріоритету 1 на слотах 5-7
+        // [FIX B] Перебудовуємо lateList на кожному pass — після попереднього swap картина змінилась
         const lateList = schedule.filter(ls =>
             ls.slot >= 5 && ls.slot <= 7 && !ls.isManual && getPriority(ls.subject) === 1
         );
@@ -505,7 +505,8 @@ function prioritySwapPass(schedule) {
                     const earlyOk = isHardValid(pseudoEarly, early, early.day, early.slot, schedWithout);
                     if (lateOk && earlyOk) {
                         improved = true;
-                        break;
+                        // [FIX B] НЕ виходимо з outer loop — продовжуємо шукати інші swap в цьому pass
+                        break; // лише inner loop — переходимо до наступного late
                     } else {
                         // Відкочуємо swap
                         late.slot  = slotLate;
@@ -513,7 +514,7 @@ function prioritySwapPass(schedule) {
                     }
                 }
             }
-            if (improved) break;
+            // [FIX B]: прибрано "if (improved) break;" — продовжуємо через всі late
         }
 
         if (!improved) break;
@@ -594,8 +595,15 @@ function canSwap(lessonA, lessonB, schedule) {
     if (getTeacherStatus(lessonA.teacherId, d, lessonB.slot) === 2) return false;
     if (getTeacherStatus(lessonB.teacherId, d, lessonA.slot) === 2) return false;
 
-    // Перевірка вікон вчителя після swap
+    // [FIX A] Перевірка класових конфліктів після swap:
+    // Клас A на новому слоті (slotB) — чи є там хтось інший від класу A?
+    if (schedule.some(ls => ls !== lessonA && ls.day === d && ls.slot === lessonB.slot && ls.classId === lessonA.classId)) return false;
+    // Клас B на новому слоті (slotA) — чи є там хтось інший від класу B?
+    if (schedule.some(ls => ls !== lessonB && ls.day === d && ls.slot === lessonA.slot && ls.classId === lessonB.classId)) return false;
+
     const schedWithout = schedule.filter(x => x !== lessonA && x !== lessonB);
+
+    // Перевірка вікон вчителя після swap
     // Вчитель A на новій позиції
     const tASlotsNew = [...new Set(schedWithout.filter(ls => ls.day === d && ls.teacherId === lessonA.teacherId && 1<=ls.slot&&ls.slot<=7).map(ls=>ls.slot)), lessonB.slot].sort((a,b)=>a-b);
     for (let i=1;i<tASlotsNew.length;i++) { const g=tASlotsNew[i]-tASlotsNew[i-1]-1; if(g>1) return false; }
@@ -604,6 +612,14 @@ function canSwap(lessonA, lessonB, schedule) {
     const tBSlotsNew = [...new Set(schedWithout.filter(ls => ls.day === d && ls.teacherId === lessonB.teacherId && 1<=ls.slot&&ls.slot<=7).map(ls=>ls.slot)), lessonA.slot].sort((a,b)=>a-b);
     for (let i=1;i<tBSlotsNew.length;i++) { const g=tBSlotsNew[i]-tBSlotsNew[i-1]-1; if(g>1) return false; }
     let gapCountB=0; for(let i=1;i<tBSlotsNew.length;i++) { if(tBSlotsNew[i]-tBSlotsNew[i-1]>1) gapCountB++; } if(gapCountB>1) return false;
+
+    // [FIX A] Перевірка no-gap для класів після swap
+    // Клас A: отримує slotB замість slotA
+    const cASlotsNew = [...new Set(schedWithout.filter(ls => ls.day === d && ls.classId === lessonA.classId && 1<=ls.slot&&ls.slot<=7).map(ls=>ls.slot)), lessonB.slot].sort((a,b)=>a-b);
+    for (let i=1;i<cASlotsNew.length;i++) { if(cASlotsNew[i]-cASlotsNew[i-1]>1) return false; }
+    // Клас B: отримує slotA замість slotB
+    const cBSlotsNew = [...new Set(schedWithout.filter(ls => ls.day === d && ls.classId === lessonB.classId && 1<=ls.slot&&ls.slot<=7).map(ls=>ls.slot)), lessonA.slot].sort((a,b)=>a-b);
+    for (let i=1;i<cBSlotsNew.length;i++) { if(cBSlotsNew[i]-cBSlotsNew[i-1]>1) return false; }
 
     return true;
 }
@@ -1143,16 +1159,14 @@ function isHardValid(task, first, d, s, schedule) {
 
     // 6. HARD: Пріоритет 1 (матем/мови/фізика/хімія) — максимум слот 4.
     //    Слот 5 — тільки якщо всі 1-4 зайняті для вчителя АБО класу.
-    //    Слоти 6-7 — тільки якщо всі 1-5 зайняті.
-    //    Логіка: рахуємо скільки слотів 1..limit вільні для (вчитель + клас + no-gap).
+    //    Слоти 6-7 — заборонені безумовно.
     if (task.priority === 1) {
-        // Визначаємо ліміт: якщо s <= 4 — перевіряємо чи не можна раніше (для score),
-        // якщо s == 5 — ліміт пошуку = 4, якщо s >= 6 — ліміт = 5.
-        const checkLimit = s <= 4 ? s - 1 : s === 5 ? 4 : 5;
+        if (s >= 6) return false; // 6-7 заборонені безумовно для пріоритету 1
+
+        const checkLimit = s <= 4 ? s - 1 : 4; // якщо s==5, шукаємо чи є вільні 1-4
         if (checkLimit >= 1) {
-            const classSlotsCur = [...new Set(schedule
-                .filter(ls => ls.day === d && ls.classId === first.classId && ls.slot >= 1 && ls.slot <= 7)
-                .map(ls => ls.slot))];
+            // [FIX C] Включаємо поточний s в контекст no-gap — щоб знати реальний діапазон класу
+            const classSlotsCurWithS = [...new Set([...classSlots, s])];
             for (let earlyS = 1; earlyS <= checkLimit; earlyS++) {
                 const tFree = !schedule.some(ls => ls.day === d && ls.slot === earlyS &&
                     task.items.some(it => it.teacherId === ls.teacherId));
@@ -1160,17 +1174,15 @@ function isHardValid(task, first, d, s, schedule) {
                     ls.classId === first.classId);
                 const notRed = !task.items.some(it => getTeacherStatus(it.teacherId, d, earlyS) === 2);
                 let ngOk = true;
-                if (classSlotsCur.length > 0) {
-                    const maxS2 = Math.max(...classSlotsCur);
-                    const minS2 = Math.min(...classSlotsCur);
+                if (classSlotsCurWithS.length > 0) {
+                    const maxS2 = Math.max(...classSlotsCurWithS);
+                    const minS2 = Math.min(...classSlotsCurWithS);
+                    // earlyS має вписуватись в діапазон щоб не створити вікно
                     if (earlyS > maxS2 + 1 || earlyS < minS2 - 1) ngOk = false;
                 }
                 if (tFree && cFree && notRed && ngOk) return false; // є кращий слот
             }
         }
-        // Абсолютна заборона слотів 6-7 для пріоритету 1
-        // якщо є будь-який вільний слот 1-5
-        if (s >= 6) return false; // 6-7 заборонені безумовно для пріоритету 1
     }
 
     // 7. Вікно вчителя:
@@ -1297,7 +1309,19 @@ function scoreSlot(task, first, d, s, schedule) {
         else if (minGap === 2) score += 300; // вікно в 1 урок — терпимо
         else score += minGap * 600;          // велике вікно — дуже погано
     } else {
-        // Перший урок вчителя в цей день — тягнемо ближче до початку
+        // [FIX D] Перший урок вчителя в цей день:
+        // Штрафуємо якщо вчитель вже має уроки в інші дні — краще концентрувати
+        const teacherLessonsOtherDays = schedule.filter(ls =>
+            ls.day !== d && ls.teacherId === first.teacherId && ls.slot >= 1 && ls.slot <= 7
+        ).length;
+        // Чим більше вчитель вже завантажений в інші дні — тим дорожче відкривати новий день
+        // Але якщо вчитель ще зовсім без уроків — штрафу немає
+        if (teacherLessonsOtherDays > 0) {
+            // Штраф за "поодинокий урок у день": якщо це єдиний урок в цей день для вчителя —
+            // дуже небажано. Якщо в цей день вже є ще уроки — штрафу немає.
+            score += 900; // базовий штраф за новий день без сусідів
+        }
+        // Тягнемо ближче до початку
         score += (s - 1) * 80;
     }
 
