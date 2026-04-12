@@ -338,6 +338,10 @@ async function generateSchedule() {
         // ФАЗА 2: Priority Swap
         prioritySwapPass(schedule);
 
+        // ФАЗА 2b: Subject Order Fix
+        // Мова завжди раніше ніж Література в того ж вчителя/класу/день
+        subjectOrderFix(schedule);
+
         // ФАЗА 2.5: Знаходимо "погано розміщені" уроки пріоритету 1
         // (на слотах 5-7 хоча є ранніші вільні) і повертаємо їх в repair
         {
@@ -513,6 +517,68 @@ function prioritySwapPass(schedule) {
         }
 
         if (!improved) break;
+    }
+}
+
+// =============================================================
+// SUBJECT ORDER FIX
+// Правило: Мова завжди раніше (менший слот) ніж Література
+// в того ж вчителя, в тому ж класі, в той же день.
+// Також: вища пріоритетність між парою однотипних предметів.
+// =============================================================
+function subjectOrderFix(schedule) {
+    const isLanguage = subj => {
+        const n = subj.toLowerCase();
+        return n.includes('мов') && !n.includes('літ') && !n.includes('зарубіжн');
+    };
+    const isLiterature = subj => {
+        const n = subj.toLowerCase();
+        return n.includes('літ') || n.includes('зарубіжн');
+    };
+
+    let changed = true;
+    let passes = 0;
+    while (changed && passes < 20) {
+        changed = false;
+        passes++;
+
+        for (let d = 0; d < 5; d++) {
+            // Для кожного вчителя в цей день
+            const teacherIds = [...new Set(schedule.filter(ls => ls.day === d && !ls.isManual).map(ls => ls.teacherId))];
+            for (const tid of teacherIds) {
+                const classIds = [...new Set(schedule.filter(ls => ls.day === d && ls.teacherId === tid && !ls.isManual).map(ls => ls.classId))];
+                for (const cid of classIds) {
+                    const lessons = schedule.filter(ls => ls.day === d && ls.teacherId === tid && ls.classId === cid && !ls.isManual);
+                    if (lessons.length < 2) continue;
+
+                    // Знаходимо пари "мова вище літератури" (неправильно) або навпаки
+                    for (const langLesson of lessons.filter(ls => isLanguage(ls.subject))) {
+                        for (const litLesson of lessons.filter(ls => isLiterature(ls.subject))) {
+                            if (langLesson.slot > litLesson.slot) {
+                                // Мова стоїть нижче — потрібно поміняти
+                                if (canSwap(langLesson, litLesson, schedule)) {
+                                    const schedWithout = schedule.filter(x => x !== langLesson && x !== litLesson);
+                                    const pLang = { items: [langLesson], priority: getPriority(langLesson.subject), type: 'single' };
+                                    const pLit  = { items: [litLesson],  priority: getPriority(litLesson.subject),  type: 'single' };
+                                    const tmpLangSlot = langLesson.slot;
+                                    langLesson.slot = litLesson.slot;
+                                    litLesson.slot  = tmpLangSlot;
+                                    const langOk = isHardValid(pLang, langLesson, d, langLesson.slot, schedWithout);
+                                    const litOk  = isHardValid(pLit,  litLesson,  d, litLesson.slot,  schedWithout);
+                                    if (langOk && litOk) {
+                                        changed = true;
+                                    } else {
+                                        // Відкочуємо
+                                        litLesson.slot  = langLesson.slot;
+                                        langLesson.slot = tmpLangSlot;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -711,6 +777,20 @@ function tryEvacuate(lesson, blockedDay, blockedSlot, schedule, depth) {
 
         // Використовуємо isHardValid — єдина точка правди для всіх обмежень
         if (!isHardValid(pseudoTask, lesson, d, s, schedule)) continue;
+        // Додаткова перевірка: не евакуюємо пріоритет 1 на слоти >= 5
+        // якщо це не вимушено (isHardValid вже перевіряє, але double-check)
+        if (getPriority(lesson.subject) === 1 && s >= 5) {
+            // Перевіряємо чи справді немає слоту 1-4
+            let hasEarly = false;
+            for (let es = 1; es <= 4 && !hasEarly; es++) {
+                if (d === blockedDay && es === blockedSlot) continue;
+                const tF = !schedule.some(x => x.day === d && x.slot === es && x.teacherId === lesson.teacherId);
+                const cF = !schedule.some(x => x.day === d && x.slot === es && x.classId === lesson.classId);
+                const nR = getTeacherStatus(lesson.teacherId, d, es) !== 2;
+                if (tF && cF && nR) hasEarly = true;
+            }
+            if (hasEarly) continue; // є вільний ранній слот — не ставимо на 5+
+        }
 
         const teacherConflict = schedule.find(ls => ls.day === d && ls.slot === s && ls.teacherId === lesson.teacherId);
         const classConflict   = schedule.find(ls => ls.day === d && ls.slot === s && ls.classId === lesson.classId);
@@ -1061,28 +1141,36 @@ function isHardValid(task, first, d, s, schedule) {
         if (sameInDay >= 2) return false;
     }
 
-    // 6. Пріоритет 1: тільки якщо НЕ існує вільного слоту 1-4 для вчителя і класу.
-    //    Слот 5 допустимий лише якщо немає вільних 1-4.
-    //    Слоти 6-7 лише якщо немає вільних 1-5.
-    if (task.priority === 1 && s >= 5) {
-        const maxEarlyAllowed = s === 5 ? 4 : 5; // для слоту 5 шукаємо 1-4, для 6-7 шукаємо 1-5
-        const classSlotsCur = [...new Set(schedule
-            .filter(ls => ls.day === d && ls.classId === first.classId && ls.slot >= 1 && ls.slot <= 7)
-            .map(ls => ls.slot))];
-        for (let earlyS = 1; earlyS <= maxEarlyAllowed; earlyS++) {
-            const tFree = !schedule.some(ls => ls.day === d && ls.slot === earlyS &&
-                task.items.some(it => it.teacherId === ls.teacherId));
-            const cFree = !schedule.some(ls => ls.day === d && ls.slot === earlyS &&
-                ls.classId === first.classId);
-            const notRed = !task.items.some(it => getTeacherStatus(it.teacherId, d, earlyS) === 2);
-            let ngOk = true;
-            if (classSlotsCur.length > 0) {
-                const maxS2 = Math.max(...classSlotsCur);
-                const minS2 = Math.min(...classSlotsCur);
-                if (earlyS > maxS2 + 1 || earlyS < minS2 - 1) ngOk = false;
+    // 6. HARD: Пріоритет 1 (матем/мови/фізика/хімія) — максимум слот 4.
+    //    Слот 5 — тільки якщо всі 1-4 зайняті для вчителя АБО класу.
+    //    Слоти 6-7 — тільки якщо всі 1-5 зайняті.
+    //    Логіка: рахуємо скільки слотів 1..limit вільні для (вчитель + клас + no-gap).
+    if (task.priority === 1) {
+        // Визначаємо ліміт: якщо s <= 4 — перевіряємо чи не можна раніше (для score),
+        // якщо s == 5 — ліміт пошуку = 4, якщо s >= 6 — ліміт = 5.
+        const checkLimit = s <= 4 ? s - 1 : s === 5 ? 4 : 5;
+        if (checkLimit >= 1) {
+            const classSlotsCur = [...new Set(schedule
+                .filter(ls => ls.day === d && ls.classId === first.classId && ls.slot >= 1 && ls.slot <= 7)
+                .map(ls => ls.slot))];
+            for (let earlyS = 1; earlyS <= checkLimit; earlyS++) {
+                const tFree = !schedule.some(ls => ls.day === d && ls.slot === earlyS &&
+                    task.items.some(it => it.teacherId === ls.teacherId));
+                const cFree = !schedule.some(ls => ls.day === d && ls.slot === earlyS &&
+                    ls.classId === first.classId);
+                const notRed = !task.items.some(it => getTeacherStatus(it.teacherId, d, earlyS) === 2);
+                let ngOk = true;
+                if (classSlotsCur.length > 0) {
+                    const maxS2 = Math.max(...classSlotsCur);
+                    const minS2 = Math.min(...classSlotsCur);
+                    if (earlyS > maxS2 + 1 || earlyS < minS2 - 1) ngOk = false;
+                }
+                if (tFree && cFree && notRed && ngOk) return false; // є кращий слот
             }
-            if (tFree && cFree && notRed && ngOk) return false;
         }
+        // Абсолютна заборона слотів 6-7 для пріоритету 1
+        // якщо є будь-який вільний слот 1-5
+        if (s >= 6) return false; // 6-7 заборонені безумовно для пріоритету 1
     }
 
     // 7. Вікно вчителя:
