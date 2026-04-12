@@ -770,6 +770,24 @@ function tryEvacuate(lesson, blockedDay, blockedSlot, schedule, depth) {
         type: lesson.pairType || 'single'
     };
 
+    // Запам'ятовуємо "примарні" слоти вчителя: слоти де вчитель брав участь як paired_external
+    // і його запис вилучено, але фізично він там був. Це потрібно для коректної перевірки вікон.
+    // Збираємо всі слоти цього вчителя що були в schedule ДО видалення (включаючи paired партнерів).
+    const teacherPhantomSlots = {}; // day -> Set of slots
+    for (let di = 0; di < 5; di++) {
+        // Шукаємо слоти де вчитель є партнером paired_external в класі lesson
+        // (тобто де є парний запис з тим же класом і тим же слотом але це не видалений lesson)
+        const phantomForDay = new Set();
+        // Також беремо до уваги слоти з оригінального lesson (він вже видалений)
+        phantomForDay.add(lesson.slot); // слот оригіналу — "займав" цей день? тільки якщо той день
+        teacherPhantomSlots[di] = phantomForDay;
+    }
+    // Точніші фантомні слоти: для кожного paired_external у тому ж класі перевіряємо
+    // чи є в schedule партнер з тим же slot і classId
+    // Це складно — замість цього просто додаємо original slot до phantom для original day
+    const originalDay = lesson.day;
+    const originalSlot = lesson.slot;
+
     // Перебираємо всі слоти в рандомному порядку
     const slots = [];
     for (let d = 0; d < 5; d++)
@@ -785,6 +803,24 @@ function tryEvacuate(lesson, blockedDay, blockedSlot, schedule, depth) {
 
         // Використовуємо isHardValid — єдина точка правди для всіх обмежень
         if (!isHardValid(pseudoTask, lesson, d, s, schedule)) continue;
+
+        // Додаткова перевірка вікон: враховуємо original slot вчителя (вже видалений зі schedule)
+        // щоб не створювати вікно > 1 між original позицією і новою
+        if (d === originalDay) {
+            const currentTeacherSlots = schedule
+                .filter(ls => ls.day === d && ls.teacherId === lesson.teacherId && ls.slot >= 1 && ls.slot <= 7)
+                .map(ls => ls.slot);
+            // original slot ще "реально" займає місце (paired partner може залишитись)
+            const allSlotsWithOriginal = [...new Set([...currentTeacherSlots, originalSlot, s])].sort((a, b) => a - b);
+            let hasLargeGapWithOriginal = false;
+            let gapCountWithOriginal = 0;
+            for (let i = 1; i < allSlotsWithOriginal.length; i++) {
+                const gap = allSlotsWithOriginal[i] - allSlotsWithOriginal[i - 1] - 1;
+                if (gap > 1) hasLargeGapWithOriginal = true;
+                if (gap > 0) gapCountWithOriginal++;
+            }
+            if (hasLargeGapWithOriginal || gapCountWithOriginal > 1) continue;
+        }
         // Додаткова перевірка: не евакуюємо пріоритет 1 на слоти >= 5
         // якщо це не вимушено (isHardValid вже перевіряє, але double-check)
         if (getPriority(lesson.subject) === 1 && s >= 5) {
@@ -1053,19 +1089,25 @@ async function dayRebalance(unplacedTasks, schedule, startTime, restart, total) 
 
 // Відкат евакуації: видаляємо всі moved копії і повертаємо originals
 function rollbackEvacuation(changes, schedule) {
-    // Крок 1: Видаляємо всі moved уроки (шукаємо по id і по посиланню)
+    // Крок 1: Видаляємо всі moved уроки
     const movedIds = new Set(changes.map(c => c.moved.id));
+    const originalIds = new Set(changes.map(c => c.original.id));
     for (let i = schedule.length - 1; i >= 0; i--) {
-        if (movedIds.has(schedule[i].id) || changes.some(c => c.moved === schedule[i])) {
+        const ls = schedule[i];
+        if (movedIds.has(ls.id) && !originalIds.has(ls.id)) {
+            schedule.splice(i, 1);
+        } else if (changes.some(c => c.moved === ls)) {
             schedule.splice(i, 1);
         }
     }
-    // Крок 2: Повертаємо всі originals (перевіряємо що їх ще немає)
-    for (const { original } of changes) {
-        const alreadyThere = schedule.some(ls =>
-            ls.id === original.id || ls === original
-        );
-        if (!alreadyThere) schedule.push(original);
+    // Крок 2: Повертаємо всі originals у зворотному порядку (зберігаємо позиції)
+    for (let i = changes.length - 1; i >= 0; i--) {
+        const { original, removedIdx } = changes[i];
+        const alreadyThere = schedule.some(ls => ls === original || ls.id === original.id);
+        if (!alreadyThere) {
+            const insertIdx = (typeof removedIdx === 'number') ? Math.min(removedIdx, schedule.length) : schedule.length;
+            schedule.splice(insertIdx, 0, original);
+        }
     }
 }
 
