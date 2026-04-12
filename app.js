@@ -385,110 +385,118 @@ const j = Math.floor(Math.random() * (i + 1));
 }
 
 // =============================================================
-// ФАЗА 1: CLASS-DAY-FIRST GREEDY
+// ФАЗА 1: TEACHER-COORDINATED GREEDY
 //
-// Ключова ідея: для кожного класу в кожен день спочатку ставимо
-// ВСІ предмети пріоритету 1 (матем/мова/фізика/хімія) того класу —
-// вони займають слоти 1-4. Потім пріоритет 2, потім 3.
-// Це гарантує що фізкультура/мистецтво не займуть слот 2,
-// якщо туди ще не поставлена математика.
+// Проблема попереднього підходу: ітерація по класах не враховує
+// що один вчитель (Островська, Маланчук Р) має уроки в 5+ класах
+// і слоти 1-4 закінчуються до того як всі класи обслуговані.
 //
-// Порядок виконання:
-//   Раунд 1: для кожного класу × кожного дня → prio-1 задачі цього класу
-//   Раунд 2: для кожного класу × кожного дня → prio-2 задачі
-//   Раунд 3: prio-3 через greedy (вони й так ідуть в кінець дня)
+// Нова логіка:
+//   Раунд 1: ГЛОБАЛЬНО всі prio-1 задачі, відсортовані по вчителю
+//     - вчителі з найменшою к-стю вільних слотів 1-4 йдуть ПЕРШИМИ
+//     - для кожної задачі: спочатку слоти 1-4, потім 5
+//     - день вибираємо де вчитель ще не завантажений
+//   Раунд 2: всі prio-2, звичайний greedy
+//   Раунд 3: всі prio-3, звичайний greedy (штраф за ранні слоти)
 // =============================================================
 function classFirstGreedy(tasks, schedule, restart) {
 const unplaced = [];
 const classIds = […new Set(state.classes.map(c => c.id))];
-shuffleArr(classIds);
 const dayOrder = [0, 1, 2, 3, 4];
 shuffleArr(dayOrder);
 
 ```
-// Групуємо задачі по класу
-const byClass = {};
-classIds.forEach(cId => byClass[cId] = []);
-tasks.forEach(t => { if (byClass[t.classId]) byClass[t.classId].push(t); });
+// Рахуємо вільні слоти 1-4 для кожного вчителя (для сортування)
+const earlyFreeByTeacher = {};
+state.teachers.forEach(t => {
+    let c = 0;
+    for (let d = 0; d < 5; d++)
+        for (let s = 1; s <= 4; s++)
+            if (getTeacherStatus(t.id, d, s) !== 2) c++;
+    earlyFreeByTeacher[t.id] = c;
+});
 
-// Для кожного класу сортуємо: prio-1 → prio-2 → prio-3
-// Всередині prio-1: вчителі з меншою кількістю вільних ранніх слотів першими
-classIds.forEach(cId => {
-    byClass[cId].sort((a, b) => {
-        if (a.priority !== b.priority) return a.priority - b.priority;
-        if (a.priority === 1) {
-            const aFree = Math.min(...a.items.map(it => {
-                let c = 0;
-                for (let d = 0; d < 5; d++) for (let s = 1; s <= 4; s++) if (getTeacherStatus(it.teacherId, d, s) !== 2) c++;
-                return c;
-            }));
-            const bFree = Math.min(...b.items.map(it => {
-                let c = 0;
-                for (let d = 0; d < 5; d++) for (let s = 1; s <= 4; s++) if (getTeacherStatus(it.teacherId, d, s) !== 2) c++;
-                return c;
-            }));
-            return aFree - bFree;
-        }
-        return 0;
+// Рахуємо скільки prio-1 задач у кожного вчителя (дефіцит = мало місця)
+const prio1CountByTeacher = {};
+tasks.filter(t => t.priority === 1).forEach(t => {
+    t.items.forEach(it => {
+        prio1CountByTeacher[it.teacherId] = (prio1CountByTeacher[it.teacherId] || 0) + 1;
     });
 });
 
-// РАУНД 1: prio-1 — спочатку строго слоти 1-4, потім слот 5
-for (const cId of classIds) {
-    const prio1tasks = byClass[cId].filter(t => t.priority === 1);
+// ── РАУНД 1: prio-1 ──
+const prio1Tasks = tasks.filter(t => t.priority === 1);
 
-    for (const task of prio1tasks) {
-        const first = task.items[0];
-        let placed = false;
+// Сортуємо: вчителі з найменшим "запасом" (earlyFree - prio1Count) йдуть першими
+// Запас = вільних слотів 1-4 мінус потрібних prio-1 уроків
+prio1Tasks.sort((a, b) => {
+    const aMargin = Math.min(...a.items.map(it =>
+        (earlyFreeByTeacher[it.teacherId] || 0) - (prio1CountByTeacher[it.teacherId] || 0)
+    ));
+    const bMargin = Math.min(...b.items.map(it =>
+        (earlyFreeByTeacher[it.teacherId] || 0) - (prio1CountByTeacher[it.teacherId] || 0)
+    ));
+    return aMargin - bMargin; // найменший запас — першим
+});
 
-        // Сортуємо дні: спочатку ті де вчитель найменш завантажений на 1-4
-        const daysByLoad = [...dayOrder].sort((a, b) => {
-            const aL = schedule.filter(ls => ls.day === a && ls.teacherId === first.teacherId && 1 <= ls.slot && ls.slot <= 4).length;
-            const bL = schedule.filter(ls => ls.day === b && ls.teacherId === first.teacherId && 1 <= ls.slot && ls.slot <= 4).length;
-            return aL - bL;
-        });
+for (const task of prio1Tasks) {
+    const first = task.items[0];
+    let placed = false;
 
-        // Спроба 1: слоти 1-4 в будь-який день
-        outer1:
+    // Дні сортуємо: де вчитель найменш завантажений на 1-4
+    const daysByLoad = [...dayOrder].sort((a, b) => {
+        const aL = schedule.filter(ls =>
+            ls.day === a && ls.teacherId === first.teacherId && 1 <= ls.slot && ls.slot <= 4
+        ).length;
+        const bL = schedule.filter(ls =>
+            ls.day === b && ls.teacherId === first.teacherId && 1 <= ls.slot && ls.slot <= 4
+        ).length;
+        return aL - bL;
+    });
+
+    // Спроба 1: слоти 1-4
+    outer1:
+    for (const d of daysByLoad) {
+        for (let s = 1; s <= 4; s++) {
+            if (!isHardValid(task, first, d, s, schedule)) continue;
+            commitTask(task, d, s, schedule);
+            placed = true;
+            break outer1;
+        }
+    }
+
+    // Спроба 2: слот 5 (вимушено — вчитель перевантажений)
+    if (!placed) {
+        outer2:
         for (const d of daysByLoad) {
-            for (let s = 1; s <= 4; s++) {
-                if (!isHardValid(task, first, d, s, schedule)) continue;
-                commitTask(task, d, s, schedule);
-                placed = true;
-                break outer1;
-            }
+            if (!isHardValid(task, first, d, 5, schedule)) continue;
+            commitTask(task, d, 5, schedule);
+            placed = true;
+            break outer2;
         }
-
-        // Спроба 2: слот 5
-        if (!placed) {
-            outer2:
-            for (const d of daysByLoad) {
-                if (!isHardValid(task, first, d, 5, schedule)) continue;
-                commitTask(task, d, 5, schedule);
-                placed = true;
-                break outer2;
-            }
-        }
-
-        // Спроба 3: будь-який валідний слот
-        if (!placed) placed = greedyPlace(task, schedule);
-
-        if (!placed) unplaced.push(task);
     }
+
+    // Спроба 3: будь-який валідний (крайній випадок)
+    if (!placed) placed = greedyPlace(task, schedule);
+
+    if (!placed) unplaced.push(task);
 }
 
-// РАУНД 2: prio-2 — звичайний greedy по score
-for (const cId of classIds) {
-    for (const task of byClass[cId].filter(t => t.priority === 2)) {
-        if (!greedyPlace(task, schedule)) unplaced.push(task);
-    }
+// ── РАУНД 2: prio-2 ──
+const prio2Tasks = tasks.filter(t => t.priority === 2);
+// Перемішуємо для різноманіття
+shuffleArr(prio2Tasks);
+for (const task of prio2Tasks) {
+    if (!greedyPlace(task, schedule)) unplaced.push(task);
 }
 
-// РАУНД 3: prio-3 — звичайний greedy (scoreSlot їх штрафує за ранні слоти)
-for (const cId of classIds) {
-    for (const task of byClass[cId].filter(t => t.priority >= 3)) {
-        if (!greedyPlace(task, schedule)) unplaced.push(task);
-    }
+// ── РАУНД 3: prio-3 (фізкультура, мистецтво, труд) ──
+// scoreSlot штрафує ранні слоти → йдуть на 5-7 якщо є місце
+// якщо 5-7 немає → greedy автоматично бере 4, 3, 2, 1
+const prio3Tasks = tasks.filter(t => t.priority >= 3);
+shuffleArr(prio3Tasks);
+for (const task of prio3Tasks) {
+    if (!greedyPlace(task, schedule)) unplaced.push(task);
 }
 
 return unplaced;
