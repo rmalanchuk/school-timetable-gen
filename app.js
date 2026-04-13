@@ -328,6 +328,8 @@ async function generateSchedule() {
         const stillUnplaced = [...unplaced];
         await repairUnplaced(stillUnplaced, schedule, startTime, restart, total);
 
+        // Додатковий прохід gapFix після repair
+        gapFix(schedule);
         // Очищення тимчасових
         sanitize(schedule);
 
@@ -372,11 +374,26 @@ function shuffleArr(arr) {
     return arr;
 }
 
-// Видаляємо всі тимчасові записи (префікс tmp_)
+// Видаляємо тимчасові записи (tmp_) і дублікати
 function sanitize(schedule) {
+    // 1. Видаляємо tmp_
     for (let i = schedule.length - 1; i >= 0; i--) {
         if (String(schedule[i].id || '').startsWith('tmp_')) {
             schedule.splice(i, 1);
+        }
+    }
+    // 2. Видаляємо дублікати (teacher+day+slot — один вчитель двічі в одному слоті)
+    //    Залишаємо перший sch_ або перший взагалі
+    const seen = new Map();
+    for (let i = schedule.length - 1; i >= 0; i--) {
+        const ls = schedule[i];
+        if (ls.slot < 1 || ls.slot > 7) continue;
+        const key = ls.teacherId + '|' + ls.day + '|' + ls.slot;
+        if (seen.has(key)) {
+            // Є дублікат — видаляємо поточний (залишаємо перший що зустрівся)
+            schedule.splice(i, 1);
+        } else {
+            seen.set(key, true);
         }
     }
 }
@@ -662,11 +679,11 @@ function scoreSlot(task, first, d, s, schedule) {
         .map(ls => ls.slot))];
     if (tSlots.length > 0) {
         const minDist = Math.min(...tSlots.map(ts => Math.abs(ts - s)));
-        if      (minDist === 1) score -= 200;  // сусідній — великий бонус
-        else if (minDist === 2) score += 300;  // вікно 1 — штраф
-        else                    score += minDist * 600; // велике вікно — великий штраф
+        if      (minDist === 1) score -= 400;  // сусідній — великий бонус (без вікна!)
+        else if (minDist === 2) score += 600;  // вікно 1 — великий штраф
+        else                    score += minDist * 1000; // велике вікно — величезний штраф
     } else {
-        score += (s - 1) * 60; // перший урок дня — якомога раніше
+        score += (s - 1) * 80; // перший урок дня — якомога раніше
     }
 
     // Баланс по днях (не перевантажувати один день)
@@ -905,7 +922,7 @@ function priorityPushUp(schedule) {
 // S3: перемістити урок після вікна в інший день (з перевіркою обох днів)
 // ================================================================
 function gapFix(schedule) {
-    for (let pass = 0; pass < 60; pass++) {
+    for (let pass = 0; pass < 100; pass++) {
         let changed = false;
 
         const tIds = [...new Set(schedule.filter(ls => !ls.isManual && 1 <= ls.slot && ls.slot <= 7).map(ls => ls.teacherId))];
@@ -1077,10 +1094,12 @@ async function repairUnplaced(unplacedTasks, schedule, startTime, restart, total
 
             if (isHardValid(task, first, d, s, schedule)) {
                 commitTask(task, d, s, schedule);
-                // Евакуйовані уроки вже в schedule зі статусом tmp_ → залишаємо (sanitize їх видалить лише якщо вони залишаться наприкінці)
-                // Але вони вже розміщені правильно — перейменовуємо в sch_
-                for (const { moved } of evacuated) {
+                // Перейменовуємо tmp_ → sch_ і ГАРАНТУЄМО що оригінал видалений
+                for (const { orig, moved } of evacuated) {
                     moved.id = uid('sch');
+                    // Видаляємо оригінал якщо він якимось чином повернувся
+                    const origIdx = schedule.indexOf(orig);
+                    if (origIdx !== -1) schedule.splice(origIdx, 1);
                 }
                 unplacedTasks.shift();
                 repaired = true; noProgress = 0;
