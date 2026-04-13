@@ -284,28 +284,44 @@ let _generatorRunning = false;
 let _generatorStop = false;
 
 async function generateSchedule() {
-    // Якщо вже запущено — зупиняємо попередній запуск і чекаємо
-    if (_generatorRunning) {
-        _generatorStop = true;
-        // Даємо час попередньому циклу завершитись
-        await new Promise(r => setTimeout(r, 100));
-        // Якщо все ще running (заморожено) — примусовий скид
-        if (_generatorRunning) { _generatorRunning = false; }
-    }
-    _generatorRunning = true;
+    // Скидаємо попередній стан без умов
+    _generatorStop = true;
+    await new Promise(r => setTimeout(r, 50));
+    _generatorRunning = false;
     _generatorStop = false;
+    _generatorRunning = true;
 
     showLoader();
-    const startTime = Date.now();
+    await tick(); // даємо UI відмалюватись
 
-    const { tasks: allTasks, unpairedAlternating, overflowTasks } = buildTasks();
-    const total = allTasks.length;
+    let allTasks, unpairedAlternating, overflowTasks, total;
+    try {
+        const built = buildTasks();
+        allTasks = built.tasks;
+        unpairedAlternating = built.unpairedAlternating;
+        overflowTasks = built.overflowTasks;
+        total = allTasks.length;
+    } catch(e) {
+        _generatorRunning = false; hideLoader();
+        alert('Помилка buildTasks: ' + e.message + '\n' + e.stack);
+        return;
+    }
 
-    const feasIssues = checkFeasibility(allTasks);
+    let feasIssues;
+    try {
+        feasIssues = checkFeasibility(allTasks);
+    } catch(e) {
+        _generatorRunning = false; hideLoader();
+        alert('Помилка checkFeasibility: ' + e.message);
+        return;
+    }
+
     if (feasIssues.length > 0) {
         _generatorRunning = false; hideLoader();
         showFeasibilityError(feasIssues); return;
     }
+
+    const startTime = Date.now();
 
     let best = { schedule: [], unplacedCount: Infinity, unplacedList: [] };
     let restart = 0;
@@ -313,54 +329,51 @@ async function generateSchedule() {
     while (!_generatorStop) {
         restart++;
 
-        // Даємо браузеру "подихати" між рестартами щоб UI не замерзав
         await tick();
         if (_generatorStop) break;
 
-        const manual = state.schedule.filter(s => s.slot === 0 || s.slot === 8 || s.isManual);
-        const schedule = [...manual];
+        try {
+            const manual = state.schedule.filter(s => s.slot === 0 || s.slot === 8 || s.isManual);
+            const schedule = [...manual];
+            const tasks = allTasks.map(t => ({ ...t, items: t.items.map(i => ({ ...i })) }));
+            shuffleArr(tasks);
 
-        const tasks = allTasks.map(t => ({ ...t, items: t.items.map(i => ({ ...i })) }));
-        shuffleArr(tasks);
+            updateLoader(restart, Date.now() - startTime, 0, total, total, `Рестарт ${restart} | Greedy...`);
+            const unplacedTasks = await teacherCoordinatedGreedy(tasks, schedule, startTime, restart, total);
 
-        // ── ФАЗА 1: TEACHER-COORDINATED GREEDY ──
-        updateLoader(restart, Date.now() - startTime, 0, total, total, `Рестарт ${restart} | Greedy...`);
-        const unplacedTasks = await teacherCoordinatedGreedy(tasks, schedule, startTime, restart, total);
+            subjectOrderFix(schedule);
+            priorityPushUp(schedule);
+            gapFix(schedule);
+            await tick();
 
-        // ── ФАЗА 2a: Мова раніше літератури ──
-        subjectOrderFix(schedule);
+            const stillUnplaced = [...unplacedTasks];
+            await minConflictsRepair(stillUnplaced, schedule, startTime, restart, total);
 
-        // ── ФАЗА 2b: Штовхаємо prio1 на ранні слоти ──
-        priorityPushUp(schedule);
+            const unplacedCount = stillUnplaced.length;
+            if (unplacedCount < best.unplacedCount) {
+                best = {
+                    schedule: JSON.parse(JSON.stringify(schedule)),
+                    unplacedCount,
+                    unplacedList: stillUnplaced.map(t => {
+                        const it = t.items[0];
+                        const tObj = state.teachers.find(x => x.id === it.teacherId);
+                        const cObj = state.classes.find(x => x.id === it.classId);
+                        return `${it.subject} (${tObj?.name || '?'}) — ${cObj?.name || '?'} кл`;
+                    })
+                };
+            }
 
-        // ── ФАЗА 2c: Усуваємо вікна вчителів ──
-        gapFix(schedule);
-        await tick();
+            updateLoader(restart, Date.now() - startTime,
+                total - best.unplacedCount, total, best.unplacedCount,
+                `Рестарт ${restart} | Нерозміщено: ${best.unplacedCount}`);
 
-        // ── ФАЗА 3: Repair нерозміщених ──
-        const stillUnplaced = [...unplacedTasks];
-        await minConflictsRepair(stillUnplaced, schedule, startTime, restart, total);
+            if (best.unplacedCount === 0) break;
 
-        const unplacedCount = stillUnplaced.length;
-        if (unplacedCount < best.unplacedCount) {
-            best = {
-                schedule: JSON.parse(JSON.stringify(schedule)),
-                unplacedCount,
-                unplacedList: stillUnplaced.map(t => {
-                    const it = t.items[0];
-                    const tObj = state.teachers.find(x => x.id === it.teacherId);
-                    const cObj = state.classes.find(x => x.id === it.classId);
-                    return `${it.subject} (${tObj?.name || '?'}) — ${cObj?.name || '?'} кл`;
-                })
-            };
+        } catch(e) {
+            _generatorRunning = false; hideLoader();
+            alert('Помилка рестарт ' + restart + ': ' + e.message + '\n' + (e.stack||'').substring(0,200));
+            return;
         }
-
-        updateLoader(restart, Date.now() - startTime,
-            total - best.unplacedCount, total, best.unplacedCount,
-            `Рестарт ${restart} | Нерозміщено: ${best.unplacedCount}`);
-        await tick();
-
-        if (best.unplacedCount === 0) break;
     }
 
     _generatorRunning = false;
