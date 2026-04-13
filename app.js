@@ -284,7 +284,14 @@ let _generatorRunning = false;
 let _generatorStop = false;
 
 async function generateSchedule() {
-    if (_generatorRunning) { _generatorStop = true; return; }
+    // Якщо вже запущено — зупиняємо попередній запуск і чекаємо
+    if (_generatorRunning) {
+        _generatorStop = true;
+        // Даємо час попередньому циклу завершитись
+        await new Promise(r => setTimeout(r, 100));
+        // Якщо все ще running (заморожено) — примусовий скид
+        if (_generatorRunning) { _generatorRunning = false; }
+    }
     _generatorRunning = true;
     _generatorStop = false;
 
@@ -1119,32 +1126,34 @@ function getPriority(subjectName) {
 // ЛОАДЕР
 // =============================================================
 function showLoader() {
-    let el = document.getElementById('gen-loader');
-    if (!el) {
-        el = document.createElement('div');
-        el.id = 'gen-loader';
-        el.className = 'fixed inset-0 bg-black/50 flex items-center justify-center z-50';
-        el.innerHTML = `
-        <div class="bg-white rounded-2xl shadow-2xl p-8 w-[440px] space-y-4">
-            <div class="flex items-center gap-3">
-                <div class="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-                <h2 class="text-lg font-bold text-slate-800">Генерація розкладу...</h2>
-            </div>
-            <div class="text-[11px] text-slate-500 italic min-h-[16px]" id="loader-phase"></div>
-            <div class="space-y-2 text-sm text-slate-600">
-                <div class="flex justify-between"><span>Час:</span><span id="loader-time" class="font-bold text-blue-700">0с</span></div>
-                <div class="flex justify-between"><span>Розміщено:</span><span id="loader-placed" class="font-bold text-green-700">0</span></div>
-                <div class="flex justify-between"><span>Залишилось:</span><span id="loader-unplaced" class="font-bold text-orange-600">—</span></div>
-            </div>
-            <div class="w-full bg-gray-100 rounded-full h-3 overflow-hidden">
-                <div id="loader-bar" class="h-3 bg-blue-500 rounded-full transition-all" style="width:0%"></div>
-            </div>
-            <button onclick="stopGenerator()" class="w-full py-2.5 bg-red-500 text-white font-bold rounded-xl hover:bg-red-600 transition text-sm">
-                ⏹ Зупинити та зберегти найкращий результат
-            </button>
-        </div>`;
-        document.body.appendChild(el);
-    }
+    // Завжди видаляємо старий лоадер і створюємо новий
+    // щоб кнопка "Зупинити" мала свіжий стан і onclick
+    const old = document.getElementById('gen-loader');
+    if (old) old.remove();
+
+    const el = document.createElement('div');
+    el.id = 'gen-loader';
+    el.className = 'fixed inset-0 bg-black/50 flex items-center justify-center z-50';
+    el.innerHTML = `
+    <div class="bg-white rounded-2xl shadow-2xl p-8 w-[440px] space-y-4">
+        <div class="flex items-center gap-3">
+            <div class="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+            <h2 class="text-lg font-bold text-slate-800">Генерація розкладу...</h2>
+        </div>
+        <div class="text-[11px] text-slate-500 italic min-h-[16px]" id="loader-phase"></div>
+        <div class="space-y-2 text-sm text-slate-600">
+            <div class="flex justify-between"><span>Час:</span><span id="loader-time" class="font-bold text-blue-700">0с</span></div>
+            <div class="flex justify-between"><span>Розміщено:</span><span id="loader-placed" class="font-bold text-green-700">0</span></div>
+            <div class="flex justify-between"><span>Залишилось:</span><span id="loader-unplaced" class="font-bold text-orange-600">—</span></div>
+        </div>
+        <div class="w-full bg-gray-100 rounded-full h-3 overflow-hidden">
+            <div id="loader-bar" class="h-3 bg-blue-500 rounded-full transition-all" style="width:0%"></div>
+        </div>
+        <button onclick="stopGenerator()" class="w-full py-2.5 bg-red-500 text-white font-bold rounded-xl hover:bg-red-600 transition text-sm">
+            ⏹ Зупинити та зберегти найкращий результат
+        </button>
+    </div>`;
+    document.body.appendChild(el);
     el.style.display = 'flex';
 }
 
