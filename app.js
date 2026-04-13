@@ -313,6 +313,10 @@ async function generateSchedule() {
     while (!_generatorStop) {
         restart++;
 
+        // Даємо браузеру "подихати" між рестартами щоб UI не замерзав
+        await tick();
+        if (_generatorStop) break;
+
         const manual = state.schedule.filter(s => s.slot === 0 || s.slot === 8 || s.isManual);
         const schedule = [...manual];
 
@@ -320,7 +324,8 @@ async function generateSchedule() {
         shuffleArr(tasks);
 
         // ── ФАЗА 1: TEACHER-COORDINATED GREEDY ──
-        const unplacedTasks = teacherCoordinatedGreedy(tasks, schedule);
+        updateLoader(restart, Date.now() - startTime, 0, total, total, `Рестарт ${restart} | Greedy...`);
+        const unplacedTasks = await teacherCoordinatedGreedy(tasks, schedule, startTime, restart, total);
 
         // ── ФАЗА 2a: Мова раніше літератури ──
         subjectOrderFix(schedule);
@@ -330,6 +335,7 @@ async function generateSchedule() {
 
         // ── ФАЗА 2c: Усуваємо вікна вчителів ──
         gapFix(schedule);
+        await tick();
 
         // ── ФАЗА 3: Repair нерозміщених ──
         const stillUnplaced = [...unplacedTasks];
@@ -366,6 +372,12 @@ async function generateSchedule() {
     showGenerationReport(best.unplacedList, unpairedAlternating, overflowTasks, restart, duration);
 }
 
+// Глобальний скид стану генератора (на випадок краша)
+function resetGenerator() {
+    _generatorRunning = false;
+    _generatorStop = false;
+}
+
 function stopGenerator() { _generatorStop = true; }
 async function tick() { await new Promise(r => setTimeout(r, 0)); }
 
@@ -388,7 +400,7 @@ function shuffleArr(arr) {
 // Раунд 2: prio-2, shuffled
 // Раунд 3: prio-3, shuffled (scoreSlot штрафує ранні слоти)
 // =============================================================
-function teacherCoordinatedGreedy(tasks, schedule) {
+async function teacherCoordinatedGreedy(tasks, schedule, startTime, restart, total) {
     const unplaced = [];
 
     // Рахуємо вільні слоти 1-4 на всі 5 днів для кожного вчителя
@@ -453,14 +465,24 @@ function teacherCoordinatedGreedy(tasks, schedule) {
     // ── РАУНД 2: prio-2 ──
     const prio2Tasks = tasks.filter(t => t.priority === 2);
     shuffleArr(prio2Tasks);
-    for (const task of prio2Tasks)
-        if (!greedyPlace(task, schedule)) unplaced.push(task);
+    for (let i = 0; i < prio2Tasks.length; i++) {
+        if (!greedyPlace(prio2Tasks[i], schedule)) unplaced.push(prio2Tasks[i]);
+        if (i % 20 === 0) {
+            updateLoader(restart, Date.now() - startTime, total - unplaced.length, total, unplaced.length, `Рестарт ${restart} | Greedy prio2 ${i}/${prio2Tasks.length}`);
+            await tick();
+        }
+    }
 
     // ── РАУНД 3: prio-3 ──
     const prio3Tasks = tasks.filter(t => t.priority >= 3);
     shuffleArr(prio3Tasks);
-    for (const task of prio3Tasks)
-        if (!greedyPlace(task, schedule)) unplaced.push(task);
+    for (let i = 0; i < prio3Tasks.length; i++) {
+        if (!greedyPlace(prio3Tasks[i], schedule)) unplaced.push(prio3Tasks[i]);
+        if (i % 20 === 0) {
+            updateLoader(restart, Date.now() - startTime, total - unplaced.length, total, unplaced.length, `Рестарт ${restart} | Greedy prio3 ${i}/${prio3Tasks.length}`);
+            await tick();
+        }
+    }
 
     return unplaced;
 }
@@ -756,11 +778,15 @@ function buildCandidates(task, first, schedule) {
 }
 
 function countValidSlots(task, schedule) {
+    // Швидка версія: рахуємо лише перші знайдені валідні слоти (для MRV сортування)
+    // Не потрібна точна кількість — достатньо порівняльного значення
     const first = task.items[0];
     let c = 0;
     for (let d = 0; d < 5; d++)
-        for (let s = 1; s <= 7; s++)
+        for (let s = 1; s <= 7; s++) {
             if (isHardValid(task, first, d, s, schedule)) c++;
+            if (c >= 15) return c; // достатньо для сортування
+        }
     return c;
 }
 
