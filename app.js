@@ -453,6 +453,14 @@ function phasedGreedy(tasks, schedule) {
         if (!greedyPlace(task, schedule)) unplaced.push(task);
     }
 
+    // Round E: retry — після всіх розміщень пробуємо знову нерозміщені
+    // (нові уроки могли відкрити слоти через no-gap)
+    const retryList = [...unplaced];
+    unplaced.length = 0;
+    for (const task of retryList) {
+        if (!greedyPlace(task, schedule)) unplaced.push(task);
+    }
+
     return unplaced;
 }
 
@@ -566,7 +574,7 @@ function gapFix(schedule) {
                     const afterL  = schedule.find(ls => ls.day === d && ls.teacherId === tid && ls.slot === gap.hi && !ls.isManual);
                     const beforeL = schedule.find(ls => ls.day === d && ls.teacherId === tid && ls.slot === gap.lo && !ls.isManual);
 
-                    // Стратегія 1: swap afterL ↔ урок на gap.lo+1 (в тому ж класі)
+                    // Стратегія 1a: swap afterL ↔ урок на gap.lo+1 (той самий клас)
                     if (afterL) {
                         const tgt = gap.lo + 1;
                         for (const cand of schedule.filter(ls => ls.day === d && ls.slot === tgt && ls.classId === afterL.classId && !ls.isManual && ls.teacherId !== tid)) {
@@ -575,10 +583,28 @@ function gapFix(schedule) {
                     }
                     if (changed) break;
 
-                    // Стратегія 2: swap beforeL ↔ урок на gap.hi-1
+                    // Стратегія 1b: swap afterL ↔ будь-який урок на gap.lo+1 (будь-який клас)
+                    if (afterL && !changed) {
+                        const tgt = gap.lo + 1;
+                        for (const cand of schedule.filter(ls => ls.day === d && ls.slot === tgt && !ls.isManual && ls.teacherId !== tid)) {
+                            if (safeSwap(afterL, cand, schedule)) { changed = true; break; }
+                        }
+                    }
+                    if (changed) break;
+
+                    // Стратегія 2: swap beforeL ↔ урок на gap.hi-1 (той самий клас)
                     if (beforeL && !changed) {
                         const tgt = gap.hi - 1;
                         for (const cand of schedule.filter(ls => ls.day === d && ls.slot === tgt && ls.classId === beforeL.classId && !ls.isManual && ls.teacherId !== tid)) {
+                            if (safeSwap(beforeL, cand, schedule)) { changed = true; break; }
+                        }
+                    }
+                    if (changed) break;
+
+                    // Стратегія 2b: swap beforeL ↔ будь-який урок на gap.hi-1
+                    if (beforeL && !changed) {
+                        const tgt = gap.hi - 1;
+                        for (const cand of schedule.filter(ls => ls.day === d && ls.slot === tgt && !ls.isManual && ls.teacherId !== tid)) {
                             if (safeSwap(beforeL, cand, schedule)) { changed = true; break; }
                         }
                     }
@@ -644,29 +670,50 @@ function safeSwap(lA, lB, schedule) {
 // PHASE 3: REPAIR — евакуація блокерів
 // =============================================================
 async function repairUnplaced(unplacedTasks, schedule, startTime, restart, total) {
-    const MAX = 400;
+    const MAX = 600;
     let noProgress = 0;
 
     for (let iter = 0; iter < MAX && unplacedTasks.length > 0; iter++) {
         if (_generatorStop) break;
-        if (iter % 15 === 0) {
+        if (iter % 10 === 0) {
             updateLoader(restart, Date.now() - startTime,
                 total - unplacedTasks.length, total, unplacedTasks.length,
                 `Рестарт ${restart} | Repair ${iter} | Залишилось: ${unplacedTasks.length}`);
             await tick();
         }
 
-        if (noProgress > 50) { shuffleArr(unplacedTasks); noProgress = 0; }
-        if (iter % 5 === 0) {
+        // Якщо застрягли — перемішуємо і пробуємо всі задачі знову
+        if (noProgress > 30) {
+            shuffleArr(unplacedTasks);
+            noProgress = 0;
+            // Спроба прямого розміщення для всіх задач після shuffle
+            const stillLeft = [];
+            for (const t of [...unplacedTasks]) {
+                if (greedyPlace(t, schedule)) {
+                    unplacedTasks.splice(unplacedTasks.indexOf(t), 1);
+                } else {
+                    stillLeft.push(t);
+                }
+            }
+            continue;
+        }
+
+        // MRV: рідше — дорого
+        if (iter % 7 === 0) {
             unplacedTasks.sort((a, b) => countValidSlots(a, schedule) - countValidSlots(b, schedule));
         }
 
         const task = unplacedTasks[0];
         const first = task.items[0];
 
-        if (greedyPlace(task, schedule)) { unplacedTasks.shift(); noProgress = 0; continue; }
+        // Спроба прямого розміщення
+        if (greedyPlace(task, schedule)) {
+            unplacedTasks.shift();
+            noProgress = 0;
+            continue;
+        }
 
-        // Збираємо кандидатні слоти з можливими блокерами
+        // Евакуація блокерів
         const candidates = buildCandidates(task, first, schedule);
         let repaired = false;
 
@@ -711,7 +758,7 @@ function buildCandidates(task, first, schedule) {
             const bT = schedule.filter(ls => ls.day === d && ls.slot === s && task.items.some(it => it.teacherId === ls.teacherId) && !ls.isManual);
             const bC = schedule.filter(ls => ls.day === d && ls.slot === s && ls.classId === first.classId && !ls.isManual);
             const blockers = [...new Map([...bT, ...bC].map(b => [b.id, b])).values()];
-            if (blockers.length <= 2) result.push({ d, s, blockers, score: s + d * 7 });
+            if (blockers.length <= 3) result.push({ d, s, blockers, score: s + d * 7 });
         }
     }
     return result.sort((a, b) => a.blockers.length - b.blockers.length || a.score - b.score);
