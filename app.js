@@ -336,7 +336,8 @@ async function generateSchedule() {
                 `⚡ Генерація ${restart} | Найкращий: ${best.unplacedCount === Infinity ? '—' : best.unplacedCount} не розм.`);
             await tick();
 
-            const unplaced = phasedGreedy(tasks, schedule);
+            buildGymReservations(tasks);
+    const unplaced = phasedGreedy(tasks, schedule);
             subjectOrderFix(schedule);
             gapFix(schedule);
             priorityPushUp(schedule);
@@ -615,6 +616,22 @@ function isHardValid(task, first, d, s, schedule) {
     if (roomType === 'gym') {
         if (schedule.some(ls => ls.day === d && ls.classId === first.classId && getRoomType(ls.subject) === 'gym' && ls.slot !== s)) return false;
     }
+
+    // Gym резервування: не-gym урок не може зайняти зарезервований слот
+    // якщо для нього є альтернатива
+    if (roomType !== 'gym' && _gymReserved.has(`${first.classId}|${d}|${s}`)) {
+        for (let dd = 0; dd < 5; dd++) {
+            for (let ss = 1; ss <= 7; ss++) {
+                if (dd === d && ss === s) continue;
+                if (_gymReserved.has(`${first.classId}|${dd}|${ss}`)) continue;
+                const tFree = !schedule.some(ls => ls.day === dd && ls.slot === ss && task.items.some(it => it.teacherId === ls.teacherId));
+                const cFree = !schedule.some(ls => ls.day === dd && ls.slot === ss && ls.classId === first.classId);
+                const notRed = !task.items.some(it => getTeacherStatus(it.teacherId, dd, ss) === 2);
+                if (tFree && cFree && notRed) return false; // є альтернатива — не займаємо резерв
+            }
+        }
+    }
+
     if (isLaborSubject(first.subject)) {
         if (schedule.some(ls => ls.day === d && ls.slot === s && ls.classId !== first.classId && isLaborSubject(ls.subject))) return false;
     }
@@ -712,6 +729,49 @@ function scoreSlot(task, first, d, s, schedule) {
 
     score += Math.random() * 10;
     return score;
+}
+
+// ================================================================
+// GYM RESERVATION: резервуємо слоти зали для gym-вчителів
+// Викликається перед phasedGreedy, результат зберігається глобально
+// ================================================================
+let _gymReserved = new Set(); // "classId|day|slot"
+
+function buildGymReservations(tasks) {
+    _gymReserved = new Set();
+
+    // Gym задачі по вчителях і класах
+    const gymByTeacher = {};
+    tasks.filter(t => getRoomType(t.items[0].subject) === 'gym').forEach(t => {
+        const tid = t.items[0].teacherId;
+        const cid = t.classId;
+        if (!gymByTeacher[tid]) gymByTeacher[tid] = {};
+        if (!gymByTeacher[tid][cid]) gymByTeacher[tid][cid] = 0;
+        gymByTeacher[tid][cid]++;
+    });
+
+    // Для кожного gym-вчителя і класу знаходимо можливі слоти
+    Object.entries(gymByTeacher).forEach(([tid, classes]) => {
+        const avail = state.teachers.find(t => t.id === tid)?.availability || [];
+
+        Object.entries(classes).forEach(([cid, needed]) => {
+            // Знаходимо всі слоти де вчитель може + зала теоретично може бути вільна
+            const possibleSlots = [];
+            for (let d = 0; d < 5; d++) {
+                for (let s = 1; s <= 7; s++) {
+                    if (avail[d]?.[s] === 2) continue; // червона зона
+                    possibleSlots.push({ d, s });
+                }
+            }
+
+            // Якщо можливих слотів мало — резервуємо
+            if (possibleSlots.length <= needed + 5) {
+                possibleSlots.forEach(({ d, s }) => {
+                    _gymReserved.add(`${cid}|${d}|${s}`);
+                });
+            }
+        });
+    });
 }
 
 // ================================================================
