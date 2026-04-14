@@ -463,23 +463,23 @@ function buildTasks() {
                 tasks.push({ type: 'paired_internal', items: [i1, i2], priority: Math.min(getPriority(i1.subject), getPriority(i2.subject)), classId: cId });
             }
         });
-        // Пари різних вчителів (синій) — спочатку prio-1 з prio-1
+        // Пари різних вчителів (синій маркер)
+        // Прохід 1: prio-1 з prio-1
+        // Прохід 2: prio-2 з prio-2
+        // Прохід 3: залишки між собою (різні пріоритети — теж паруємо!)
         let rem = flat.filter(w => w.classId === cId && w.currentHours === 0.5 && w.splitType === 'alternating' && !w.used);
-        while (rem.length >= 2) {
-            const i1 = rem.shift();
-            const p1 = getPriority(i1.subject);
-            const i2 = rem.find(w => w.teacherId !== i1.teacherId && getPriority(w.subject) === p1)
-                    || rem.find(w => w.teacherId !== i1.teacherId);
-            if (!i2) {
-                i1.used = true;
-                const tObj = state.teachers.find(t => t.id === i1.teacherId);
-                const cObj = state.classes.find(c => c.id === i1.classId);
-                unpairedAlt.push({ subject: i1.subject, teacher: tObj?.name || '?', className: cObj?.name || '?', teacherId: i1.teacherId, classId: i1.classId });
-                break;
+        for (const targetPrio of [1, 2, null]) { // null = будь-який
+            const pool = targetPrio !== null ? rem.filter(w => getPriority(w.subject) === targetPrio) : [...rem];
+            while (pool.length >= 2) {
+                const i1 = pool.shift();
+                if (i1.used) continue;
+                const i2 = pool.find(w => w.teacherId !== i1.teacherId && !w.used);
+                if (!i2) continue;
+                pool.splice(pool.indexOf(i2), 1);
+                rem = rem.filter(w => w !== i1 && w !== i2);
+                i1.used = i2.used = true;
+                tasks.push({ type: 'paired_external', items: [i1, i2], priority: Math.min(getPriority(i1.subject), getPriority(i2.subject)), classId: cId });
             }
-            rem.splice(rem.indexOf(i2), 1);
-            i1.used = i2.used = true;
-            tasks.push({ type: 'paired_external', items: [i1, i2], priority: Math.min(p1, getPriority(i2.subject)), classId: cId });
         }
         // Непарні
         flat.filter(w => w.classId === cId && w.currentHours === 0.5 && w.splitType === 'alternating' && !w.used).forEach(item => {
@@ -566,18 +566,6 @@ function isHardValid(task, first, d, s, schedule) {
         const cls = state.classes.find(c => c.id === first.classId);
         if (cls && parseInt(cls.name) >= 1 && parseInt(cls.name) <= 4 && s > 4) return false;
     }
-    // 3c. Інформатика блоком: молодші класи (1-4) на слоті 4,
-    //     старші класи (5+) не раніше слоту 5.
-    //     Це гарантує що комп'ютерний клас зайнятий блоком без розривів.
-    if (getRoomType(first.subject) === 'computer') {
-        const cls = state.classes.find(c => c.id === first.classId);
-        if (cls) {
-            const cn = parseInt(cls.name);
-            if (cn >= 1 && cn <= 4 && s !== 4) return false;  // молодші строго на слоті 4
-            if (cn >= 5 && s < 5) return false;               // старші не раніше слоту 5
-        }
-    }
-
     const classSlots = [...new Set(schedule
         .filter(ls => ls.day === d && ls.classId === first.classId && ls.slot >= 1 && ls.slot <= 7)
         .map(ls => ls.slot))];
@@ -684,6 +672,10 @@ function scoreSlot(task, first, d, s, schedule) {
     }
     const classToday = [...new Set(schedule.filter(ls => ls.day === d && ls.classId === first.classId && ls.slot >= 1 && ls.slot <= 7).map(ls => ls.slot))];
     if (classToday.length === 0 && s > 1) score += (s - 1) * 150;
+
+    // Вчитель починає пізно — штраф (щоб Маланчук починав з слоту 1)
+    const teacherToday = [...new Set(schedule.filter(ls => ls.day === d && ls.teacherId === first.teacherId && 1 <= ls.slot && ls.slot <= 7).map(ls => ls.slot))];
+    if (teacherToday.length === 0 && s > 1 && priority <= 2) score += (s - 1) * 180;
     const sameSubjTeacher = schedule.filter(ls => ls.day === d && ls.teacherId === first.teacherId && ls.subject === first.subject && 1 <= ls.slot && ls.slot <= 7).map(ls => ls.slot);
     if (sameSubjTeacher.length > 0) {
         const minSubjDist = Math.min(...sameSubjTeacher.map(ts => Math.abs(ts - s)));
@@ -783,8 +775,15 @@ function phasedGreedy(tasks, schedule) {
             if (!placePrio1(task)) unplaced.push(task);
         }
     }
+    // Між prio-1 і prio-2: виштовхуємо prio-1 вище щоб звільнити ранні слоти
+    priorityPushUp(schedule);
+    subjectOrderFix(schedule);
+
     for (const task of shuffleArr(tasks.filter(t => t.priority === 2))) { if (!greedyPlace(task, schedule)) unplaced.push(task); }
     for (const task of shuffleArr(tasks.filter(t => t.priority >= 3))) { if (!greedyPlace(task, schedule)) unplaced.push(task); }
+
+    // Retry + ще один pushUp
+    priorityPushUp(schedule);
     const retry = [...unplaced]; unplaced.length = 0;
     for (const task of retry) { if (!greedyPlace(task, schedule)) unplaced.push(task); }
     return unplaced;
@@ -1135,10 +1134,11 @@ async function repairUnplaced(unplacedTasks, schedule, startTime, restart, total
 async function localSearchRepair(unplacedTasks, schedule, startTime, restart, total) {
     const MAX = 800; let noProgress = 0;
     const lsStartTime = Date.now();
+    let lsNoImprove = 0;
     for (let iter = 0; iter < MAX && unplacedTasks.length > 0; iter++) {
         if (_generatorStop) break;
-        // Виходимо якщо localSearch крутиться > 20с без результату
-        if (Date.now() - lsStartTime > 20000) break;
+        // Виходимо якщо 15с без прогресу
+        if (lsNoImprove > 50 || Date.now() - lsStartTime > 15000) break;
         if (iter % 3 === 0) {
             updateLoader(restart, Date.now()-startTime, total-unplacedTasks.length, total, unplacedTasks.length,
                 `🔍 Local Search iter ${iter} | Залишилось: ${unplacedTasks.length} (глибина 7)`);
@@ -1171,7 +1171,8 @@ async function localSearchRepair(unplacedTasks, schedule, startTime, restart, to
                 for (const r of evacuated) rollbackEvac(r, schedule);
             }
         }
-        if (!repaired) { noProgress++; unplacedTasks.push(unplacedTasks.shift()); }
+        if (!repaired) { noProgress++; lsNoImprove++; unplacedTasks.push(unplacedTasks.shift()); }
+        else { lsNoImprove = 0; }
     }
 }
 
