@@ -330,6 +330,8 @@ async function generateSchedule() {
         // Ще раз обидва — priorityPushUp міг перемістити уроки і створити нові вікна
         gapFix(schedule);
         priorityPushUp(schedule);
+        // selfReorder: переставляємо уроки одного вчителя (prio-1 вище prio-2/3)
+        selfReorder(schedule);
 
         // Фаза 3: repair
         const stillUnplaced = [...unplaced];
@@ -381,7 +383,7 @@ function shuffleArr(arr) {
     return arr;
 }
 
-// Видаляємо тимчасові записи і дублікати
+// Видаляємо тимчасові записи і надлишкові уроки
 function sanitize(schedule) {
     // 1. Видаляємо tmp_
     for (let i = schedule.length - 1; i >= 0; i--) {
@@ -390,7 +392,8 @@ function sanitize(schedule) {
             schedule.splice(i, 1);
         }
     }
-    // 2. Видаляємо дублікати teacher+day+slot
+
+    // 2. Видаляємо дублікати teacher+day+slot+classId
     const seen = new Map();
     for (let i = schedule.length - 1; i >= 0; i--) {
         const ls = schedule[i];
@@ -400,6 +403,34 @@ function sanitize(schedule) {
             schedule.splice(i, 1);
         } else {
             seen.set(key, true);
+        }
+    }
+
+    // 3. Обрізаємо надлишок по teacher+class+subject
+    // Рахуємо потрібну кількість з навантаження
+    const needed = {};
+    state.workload.forEach(w => {
+        const h = parseFloat(w.hours);
+        const whole = Math.floor(h);
+        const frac = Math.round((h - whole) * 10) / 10;
+        // Цілих уроків
+        const slots = whole + (Math.abs(frac - 0.5) < 0.01 && w.splitType === 'alternating' ? 1 : 0);
+        const key = w.teacherId + '|' + w.classId + '|' + w.subject.toLowerCase();
+        needed[key] = (needed[key] || 0) + slots;
+    });
+
+    // Рахуємо скільки є в розкладі
+    const counts = {};
+    for (let i = schedule.length - 1; i >= 0; i--) {
+        const ls = schedule[i];
+        if (ls.slot < 1 || ls.slot > 7 || ls.isManual) continue;
+        const key = ls.teacherId + '|' + ls.classId + '|' + ls.subject.toLowerCase();
+        counts[key] = (counts[key] || 0) + 1;
+        const need = needed[key] || 0;
+        if (counts[key] > need) {
+            // Надлишок — видаляємо цей урок (ітеруємо з кінця, тому видаляємо пізніші)
+            schedule.splice(i, 1);
+            counts[key]--;
         }
     }
 }
@@ -934,6 +965,58 @@ function priorityPushUp(schedule) {
                 if (!done) schedule.splice(idx, 0, lateL); // повертаємо якщо не знайшли
             }
             if (done) break;
+        }
+        if (!changed) break;
+    }
+}
+
+// ================================================================
+// SELF REORDER: переставляємо уроки одного вчителя в межах дня
+// щоб prio-1 стояли раніше prio-2/3
+// (safeSwap не працює між уроками одного вчителя)
+// ================================================================
+function selfReorder(schedule) {
+    for (let pass = 0; pass < 20; pass++) {
+        let changed = false;
+
+        const tIds = [...new Set(schedule.filter(ls => !ls.isManual && 1 <= ls.slot && ls.slot <= 7).map(ls => ls.teacherId))];
+
+        for (const tid of tIds) {
+            for (let d = 0; d < 5; d++) {
+                const dayLessons = schedule.filter(ls =>
+                    ls.day === d && ls.teacherId === tid && !ls.isManual && 1 <= ls.slot && ls.slot <= 7
+                );
+                if (dayLessons.length < 2) continue;
+
+                // Шукаємо prio-1 урок що стоїть пізніше prio-2/3 уроку того ж вчителя
+                for (const late of dayLessons.filter(ls => getPriority(ls.subject) === 1 && ls.slot >= 4)) {
+                    for (const early of dayLessons.filter(ls => getPriority(ls.subject) > 1 && ls.slot < late.slot)) {
+                        // Перевіряємо чи можна поміняти місцями
+                        const sLate = late.slot, sEarly = early.slot;
+
+                        // Після swap: перевіряємо isHardValid для обох (без цих двох)
+                        late.slot = sEarly;
+                        early.slot = sLate;
+                        const without = schedule.filter(x => x !== late && x !== early);
+                        const pLate  = { items: [late],  priority: getPriority(late.subject),  type: late.pairType  || 'single' };
+                        const pEarly = { items: [early], priority: getPriority(early.subject), type: early.pairType || 'single' };
+                        const okL = isHardValid(pLate,  late,  d, sEarly, without);
+                        const okE = isHardValid(pEarly, early, d, sLate,  without);
+
+                        if (okL && okE) {
+                            changed = true;
+                            break;
+                        } else {
+                            // Відкат
+                            late.slot = sLate;
+                            early.slot = sEarly;
+                        }
+                    }
+                    if (changed) break;
+                }
+                if (changed) break;
+            }
+            if (changed) break;
         }
         if (!changed) break;
     }
