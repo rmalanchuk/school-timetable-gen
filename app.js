@@ -322,8 +322,9 @@ async function generateSchedule() {
             await localSearchRepair(stillUnplaced, schedule, startTime, restart, total);
             subjectOrderFix(schedule);
             priorityPushUp(schedule);
+            compactTeachers(schedule);
             gapFix(schedule);
-            gapFix(schedule); // другий прохід для залишкових вікон
+            gapFix(schedule);
             selfReorder(schedule);
             sanitize(schedule);
 
@@ -341,6 +342,7 @@ async function generateSchedule() {
             subjectOrderFix(schedule);
             gapFix(schedule);
             priorityPushUp(schedule);
+            compactTeachers(schedule);
             gapFix(schedule);
             priorityPushUp(schedule);
             selfReorder(schedule);
@@ -628,19 +630,23 @@ function isHardValid(task, first, d, s, schedule) {
         if (schedule.some(ls => ls.day === d && ls.classId === first.classId && getRoomType(ls.subject) === 'gym' && ls.slot !== s)) return false;
     }
 
-    // Gym резервування: не-gym урок не може зайняти зарезервований слот
-    // якщо для нього є альтернатива
+    // Gym резервування: не-gym урок не займає зарезервований слот
+    // Спрощена перевірка: якщо зарезервовано і є хоча б 1 вільний не-зарезервований слот
     if (roomType !== 'gym' && _gymReserved.has(`${first.classId}|${d}|${s}`)) {
-        for (let dd = 0; dd < 5; dd++) {
-            for (let ss = 1; ss <= 7; ss++) {
-                if (dd === d && ss === s) continue;
-                if (_gymReserved.has(`${first.classId}|${dd}|${ss}`)) continue;
-                const tFree = !schedule.some(ls => ls.day === dd && ls.slot === ss && task.items.some(it => it.teacherId === ls.teacherId));
-                const cFree = !schedule.some(ls => ls.day === dd && ls.slot === ss && ls.classId === first.classId);
-                const notRed = !task.items.some(it => getTeacherStatus(it.teacherId, dd, ss) === 2);
-                if (tFree && cFree && notRed) return false; // є альтернатива — не займаємо резерв
+        // Швидка перевірка: є хоч один слот де клас може стояти без резервування?
+        const hasAlt = (() => {
+            for (let dd = 0; dd < 5; dd++) {
+                for (let ss = 1; ss <= 7; ss++) {
+                    if (_gymReserved.has(`${first.classId}|${dd}|${ss}`)) continue;
+                    if (task.items.some(it => getTeacherStatus(it.teacherId, dd, ss) === 2)) continue;
+                    if (schedule.some(ls => ls.day === dd && ls.slot === ss && task.items.some(it => it.teacherId === ls.teacherId))) continue;
+                    if (schedule.some(ls => ls.day === dd && ls.slot === ss && ls.classId === first.classId)) continue;
+                    return true;
+                }
             }
-        }
+            return false;
+        })();
+        if (hasAlt) return false;
     }
 
     if (isLaborSubject(first.subject)) {
@@ -752,35 +758,32 @@ let _gymReserved = new Set(); // "classId|day|slot"
 function buildGymReservations(tasks) {
     _gymReserved = new Set();
 
-    // Gym задачі по вчителях і класах
-    const gymByTeacher = {};
+    // Gym вчителі з обмеженою доступністю (Крайник: тільки 1-4)
+    const gymTeachers = {};
     tasks.filter(t => getRoomType(t.items[0].subject) === 'gym').forEach(t => {
         const tid = t.items[0].teacherId;
-        const cid = t.classId;
-        if (!gymByTeacher[tid]) gymByTeacher[tid] = {};
-        if (!gymByTeacher[tid][cid]) gymByTeacher[tid][cid] = 0;
-        gymByTeacher[tid][cid]++;
+        if (!gymTeachers[tid]) {
+            const avail = state.teachers.find(tt => tt.id === tid)?.availability || [];
+            let freeCount = 0;
+            for (let d = 0; d < 5; d++) for (let s = 1; s <= 7; s++) if (avail[d]?.[s] !== 2) freeCount++;
+            gymTeachers[tid] = { avail, freeCount, tasks: [] };
+        }
+        gymTeachers[tid].tasks.push(t);
     });
 
-    // Для кожного gym-вчителя і класу знаходимо можливі слоти
-    Object.entries(gymByTeacher).forEach(([tid, classes]) => {
-        const avail = state.teachers.find(t => t.id === tid)?.availability || [];
+    // Резервуємо тільки для вчителів з дефіцитом (мало вільних слотів)
+    Object.entries(gymTeachers).forEach(([tid, info]) => {
+        const needed = info.tasks.length;
+        if (info.freeCount > needed + 8) return; // достатньо місця — не резервуємо
 
-        Object.entries(classes).forEach(([cid, needed]) => {
-            // Знаходимо всі слоти де вчитель може + зала теоретично може бути вільна
-            const possibleSlots = [];
+        // Резервуємо всі слоти де вчитель доступний для його класів
+        info.tasks.forEach(task => {
+            const cid = task.classId;
             for (let d = 0; d < 5; d++) {
                 for (let s = 1; s <= 7; s++) {
-                    if (avail[d]?.[s] === 2) continue; // червона зона
-                    possibleSlots.push({ d, s });
-                }
-            }
-
-            // Якщо можливих слотів мало — резервуємо
-            if (possibleSlots.length <= needed + 5) {
-                possibleSlots.forEach(({ d, s }) => {
+                    if (info.avail[d]?.[s] === 2) continue;
                     _gymReserved.add(`${cid}|${d}|${s}`);
-                });
+                }
             }
         });
     });
@@ -1011,7 +1014,9 @@ function subjectOrderFix(schedule) {
 // PRIORITY PUSH UP
 // ================================================================
 function priorityPushUp(schedule) {
+    const puStart = Date.now();
     for (let pass = 0; pass < 60; pass++) {
+        if (Date.now() - puStart > 2000) break;
         let changed = false;
         const late = schedule.filter(ls => !ls.isManual && getPriority(ls.subject) === 1 && ls.slot >= 5);
         for (const lateL of late) {
@@ -1114,9 +1119,79 @@ function selfReorder(schedule) {
 }
 
 // ================================================================
+// COMPACT TEACHERS
+// Якщо вчитель має день де 1-2 уроки стоять далеко від решти —
+// переміщуємо їх в інший день щоб усунути великі вікна
+// і звільнити місце для нових уроків
+// ================================================================
+function compactTeachers(schedule) {
+    const startMs = Date.now();
+    for (let pass = 0; pass < 20; pass++) {
+        if (Date.now() - startMs > 2000) break; // max 2 секунди
+        let changed = false;
+        const tIds = [...new Set(schedule.filter(ls => !ls.isManual && 1<=ls.slot && ls.slot<=7).map(ls => ls.teacherId))];
+
+        for (const tid of tIds) {
+            for (let d = 0; d < 5; d++) {
+                const tSlots = [...new Set(schedule.filter(ls => ls.day===d && ls.teacherId===tid && 1<=ls.slot && ls.slot<=7).map(ls=>ls.slot))].sort((a,b)=>a-b);
+                if (tSlots.length < 2) continue;
+
+                // Шукаємо великий розрив (> 1 урок)
+                for (let i = 0; i+1 < tSlots.length; i++) {
+                    if (tSlots[i+1] - tSlots[i] <= 2) continue;
+
+                    // Є великий розрив між tSlots[i] і tSlots[i+1]
+                    // Спробуємо перемістити "меншу" частину в інший день
+                    const beforeGap = tSlots.slice(0, i+1);
+                    const afterGap  = tSlots.slice(i+1);
+                    const moveGroup = beforeGap.length <= afterGap.length ? beforeGap : afterGap;
+
+                    for (const moveSlot of moveGroup) {
+                        const lesson = schedule.find(ls => ls.day===d && ls.teacherId===tid && ls.slot===moveSlot && !ls.isManual);
+                        if (!lesson) continue;
+
+                        const pL = { items: [lesson], priority: getPriority(lesson.subject), type: lesson.pairType||'single' };
+                        const idx = schedule.indexOf(lesson);
+                        if (idx === -1) continue;
+
+                        schedule.splice(idx, 1);
+                        let moved = false;
+
+                        // Шукаємо день де вчитель може поставити цей урок компактно
+                        for (let nd = 0; nd < 5 && !moved; nd++) {
+                            if (nd === d) continue;
+                            for (let ns = 1; ns <= 7 && !moved; ns++) {
+                                if (!isHardValid(pL, lesson, nd, ns, schedule)) continue;
+
+                                // Перевіряємо що старий день покращився
+                                const tOld = [...new Set(schedule.filter(ls=>ls.day===d&&ls.teacherId===tid&&1<=ls.slot&&ls.slot<=7).map(ls=>ls.slot))].sort((a,b)=>a-b);
+                                let oldBig = false;
+                                for (let j=1;j<tOld.length;j++) if(tOld[j]-tOld[j-1]>2) { oldBig=true; break; }
+                                // Якщо після видалення великий розрив зник — добре
+                                if (!oldBig || tOld.length === 0) {
+                                    schedule.push({ ...lesson, id: uid('sch'), day: nd, slot: ns });
+                                    changed = true; moved = true;
+                                }
+                            }
+                        }
+                        if (!moved) schedule.splice(idx, 0, lesson);
+                        if (changed) break;
+                    }
+                    if (changed) break;
+                }
+                if (changed) break;
+            }
+            if (changed) break;
+        }
+        if (!changed) break;
+    }
+}
+
+// ================================================================
 // GAP FIX
 // ================================================================
 function gapFix(schedule) {
+    const gapStart = Date.now();
     function tGaps(tid, d) {
         const sl = [...new Set(schedule.filter(ls=>ls.day===d&&ls.teacherId===tid&&1<=ls.slot&&ls.slot<=7).map(ls=>ls.slot))].sort((a,b)=>a-b);
         let gaps=0,big=false;
@@ -1125,6 +1200,7 @@ function gapFix(schedule) {
     }
 
     for (let pass = 0; pass < 60; pass++) {
+        if (Date.now() - gapStart > 3000) break; // max 3 секунди
         let changed = false;
         const tIds = [...new Set(schedule.filter(ls=>!ls.isManual&&1<=ls.slot&&ls.slot<=7).map(ls=>ls.teacherId))];
 
