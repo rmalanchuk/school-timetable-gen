@@ -306,59 +306,83 @@ async function generateSchedule() {
         return;
     }
 
-    let best = { schedule: [], unplacedCount: Infinity, unplacedList: [] };
+    let best = { schedule: [], unplacedCount: Infinity, unplacedList: [], tasks: [] };
     let restart = 0;
+    let noImproveSince = 0; // скільки рестартів без покращення
 
     while (!_generatorStop) {
         restart++;
+        const ms = Date.now() - startTime;
 
-        // Беремо тільки справжні ручні уроки (слот 0/8 або явно isManual)
-        // Всі інші — результат попередньої генерації, не беремо
-        const manual   = state.schedule.filter(s => (s.slot === 0 || s.slot === 8 || s.isManual === true));
-        const schedule = manual.map(s => ({ ...s }));
-        const tasks    = allTasks.map(t => ({ ...t, items: t.items.map(i => ({ ...i })) }));
+        let schedule, stillUnplaced;
 
-        // Фаза 1: greedy
-        const unplaced = phasedGreedy(tasks, schedule);
+        // ── РЕЖИМ ВИБОРУ ──────────────────────────────────────────
+        // Якщо є хороший best і давно без покращення → Local Search
+        // Інакше → повна генерація
+        const doLocalSearch = best.unplacedCount < Infinity
+                           && best.unplacedCount > 0
+                           && noImproveSince >= 3;
 
-        // Фаза 2: quality passes
-        subjectOrderFix(schedule);
-        // gapFix ПЕРШИЙ — прибирає вікна вчителів (напр. Бенесько [1,2,4,5,6] → [1,2,3,5,6])
-        // тоді priorityPushUp може зробити swap який раніше блокувався вікном
-        gapFix(schedule);
-        priorityPushUp(schedule);
-        // Ще раз обидва — priorityPushUp міг перемістити уроки і створити нові вікна
-        gapFix(schedule);
-        priorityPushUp(schedule);
-        // selfReorder: переставляємо уроки одного вчителя (prio-1 вище prio-2/3)
-        selfReorder(schedule);
+        if (doLocalSearch) {
+            // Беремо найкращий відомий розклад і намагаємось розмістити нерозміщені
+            schedule = JSON.parse(JSON.stringify(best.schedule));
+            stillUnplaced = best.tasks.map(t => ({ ...t, items: t.items.map(i => ({ ...i })) }));
 
-        // Фаза 3: repair
-        const stillUnplaced = [...unplaced];
-        await repairUnplaced(stillUnplaced, schedule, startTime, restart, total);
+            updateLoader(restart, ms, total - best.unplacedCount, total, best.unplacedCount,
+                `🔍 Local Search | Намагаємось розмістити ${stillUnplaced.length} уроків...`);
+            await tick();
 
-        // Додатковий прохід gapFix після repair
-        gapFix(schedule);
-        // Очищення тимчасових
-        sanitize(schedule);
+            // Агресивна евакуація для кожного нерозміщеного
+            await localSearchRepair(stillUnplaced, schedule, startTime, restart, total);
+            gapFix(schedule);
+            selfReorder(schedule);
+            sanitize(schedule);
+
+        } else {
+            // Повна генерація з нуля
+            const manual = state.schedule.filter(s => s.slot === 0 || s.slot === 8);
+            schedule = manual.map(s => ({ ...s }));
+            const tasks = allTasks.map(t => ({ ...t, items: t.items.map(i => ({ ...i })) }));
+
+            updateLoader(restart, ms, total - best.unplacedCount, total, best.unplacedCount,
+                `⚡ Генерація ${restart} | Найкращий: ${best.unplacedCount === Infinity ? '—' : best.unplacedCount} не розм.`);
+            await tick();
+
+            const unplaced = phasedGreedy(tasks, schedule);
+            subjectOrderFix(schedule);
+            gapFix(schedule);
+            priorityPushUp(schedule);
+            gapFix(schedule);
+            priorityPushUp(schedule);
+            selfReorder(schedule);
+
+            stillUnplaced = [...unplaced];
+            await repairUnplaced(stillUnplaced, schedule, startTime, restart, total);
+            gapFix(schedule);
+            sanitize(schedule);
+        }
 
         const count = stillUnplaced.length;
         if (count < best.unplacedCount) {
             best = {
-                schedule:     JSON.parse(JSON.stringify(schedule)),
+                schedule:      JSON.parse(JSON.stringify(schedule)),
                 unplacedCount: count,
                 unplacedList:  stillUnplaced.map(t => {
                     const it   = t.items[0];
                     const tObj = state.teachers.find(x => x.id === it.teacherId);
                     const cObj = state.classes.find(x => x.id === it.classId);
                     return `${it.subject} (${tObj?.name || '?'}) — ${cObj?.name || '?'} кл`;
-                })
+                }),
+                tasks: stillUnplaced.map(t => ({ ...t, items: t.items.map(i => ({ ...i })) }))
             };
+            noImproveSince = 0;
+        } else {
+            noImproveSince++;
         }
 
         updateLoader(restart, Date.now() - startTime,
             total - best.unplacedCount, total, best.unplacedCount,
-            `Рестарт ${restart} | Не розміщено: ${best.unplacedCount}`);
+            `Рестарт ${restart} | Найкращий: ${best.unplacedCount} | Поточний: ${count}`);
         await tick();
         if (best.unplacedCount === 0) break;
     }
@@ -1145,7 +1169,108 @@ function safeSwap(lA, lB, schedule) {
 }
 
 // ================================================================
-// REPAIR: евакуація блокерів
+// LOCAL SEARCH REPAIR
+// Беремо найкращий розклад і намагаємось вставити нерозміщені уроки
+// через агресивну евакуацію з глибиною 3 (замість звичайної 1)
+// ================================================================
+async function localSearchRepair(unplacedTasks, schedule, startTime, restart, total) {
+    const MAX = 800;
+    let noProgress = 0;
+
+    for (let iter = 0; iter < MAX && unplacedTasks.length > 0; iter++) {
+        if (_generatorStop) break;
+        if (iter % 10 === 0) {
+            updateLoader(restart, Date.now() - startTime,
+                total - unplacedTasks.length, total, unplacedTasks.length,
+                `🔍 Local Search iter ${iter} | Залишилось: ${unplacedTasks.length}`);
+            await tick();
+        }
+
+        if (noProgress > 30) {
+            shuffleArr(unplacedTasks);
+            noProgress = 0;
+            const tmp = [...unplacedTasks]; unplacedTasks.length = 0;
+            for (const t of tmp) { if (!greedyPlace(t, schedule)) unplacedTasks.push(t); }
+            continue;
+        }
+
+        if (iter % 5 === 0) {
+            unplacedTasks.sort((a, b) => countValidSlots(a, schedule) - countValidSlots(b, schedule));
+        }
+
+        const task  = unplacedTasks[0];
+        const first = task.items[0];
+
+        if (greedyPlace(task, schedule)) { unplacedTasks.shift(); noProgress = 0; continue; }
+
+        // Будуємо кандидатів — більше блокерів допускаємо (до 4)
+        const candidates = buildCandidatesDeep(task, first, schedule);
+        let repaired = false;
+
+        for (const { d, s, blockers } of candidates) {
+            const evacuated = [];
+            let ok = true;
+
+            for (const blocker of blockers) {
+                const result = evacuateOne(blocker, d, s, schedule);
+                if (result) evacuated.push(result);
+                else { ok = false; break; }
+            }
+
+            if (!ok) {
+                for (const { orig, moved } of evacuated) {
+                    const mi = schedule.indexOf(moved);
+                    if (mi !== -1) schedule.splice(mi, 1);
+                    if (!schedule.includes(orig)) schedule.push(orig);
+                }
+                continue;
+            }
+
+            if (isHardValid(task, first, d, s, schedule)) {
+                commitTask(task, d, s, schedule);
+                for (const { orig, moved } of evacuated) {
+                    moved.id = uid('sch');
+                    const origIdx = schedule.indexOf(orig);
+                    if (origIdx !== -1) schedule.splice(origIdx, 1);
+                }
+                unplacedTasks.shift();
+                repaired = true; noProgress = 0;
+                break;
+            } else {
+                for (const { orig, moved } of evacuated) {
+                    const mi = schedule.indexOf(moved);
+                    if (mi !== -1) schedule.splice(mi, 1);
+                    if (!schedule.includes(orig)) schedule.push(orig);
+                }
+            }
+        }
+
+        if (!repaired) { noProgress++; unplacedTasks.push(unplacedTasks.shift()); }
+    }
+}
+
+// Кандидати з більшою глибиною (до 4 блокерів)
+function buildCandidatesDeep(task, first, schedule) {
+    const result = [];
+    for (let d = 0; d < 5; d++) {
+        if (task.items.every(it => [1,2,3,4,5,6,7].every(s => getTeacherStatus(it.teacherId, d, s) === 2))) continue;
+        for (let s = 1; s <= 7; s++) {
+            if (task.items.some(it => getTeacherStatus(it.teacherId, d, s) === 2)) continue;
+            const cs = [...new Set(schedule.filter(ls => ls.day === d && ls.classId === first.classId && 1 <= ls.slot && ls.slot <= 7).map(ls => ls.slot))];
+            if (cs.length > 0) {
+                const mx = Math.max(...cs), mn = Math.min(...cs);
+                if (s > mx + 1 || s < mn - 1) continue;
+            }
+            const bT = schedule.filter(ls => ls.day === d && ls.slot === s && task.items.some(it => it.teacherId === ls.teacherId) && !ls.isManual);
+            const bC = schedule.filter(ls => ls.day === d && ls.slot === s && ls.classId === first.classId && !ls.isManual);
+            const blockers = [...new Map([...bT, ...bC].map(b => [b.id, b])).values()];
+            if (blockers.length <= 4) result.push({ d, s, blockers, score: s + d * 7 });
+        }
+    }
+    return result.sort((a, b) => a.blockers.length - b.blockers.length || a.score - b.score);
+}
+
+
 // ================================================================
 async function repairUnplaced(unplacedTasks, schedule, startTime, restart, total) {
     const MAX = 600;
@@ -1346,16 +1471,20 @@ function showLoader() {
         el = document.createElement('div');
         el.id = 'gen-loader';
         el.className = 'fixed inset-0 bg-black/50 flex items-center justify-center z-50';
-        el.innerHTML = `<div class="bg-white rounded-2xl shadow-2xl p-8 w-[440px] space-y-4">
+        el.innerHTML = `<div class="bg-white rounded-2xl shadow-2xl p-8 w-[460px] space-y-4">
             <div class="flex items-center gap-3">
                 <div class="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-                <h2 class="text-lg font-bold text-slate-800">Генерація розкладу v6...</h2>
+                <h2 class="text-lg font-bold text-slate-800">Генерація розкладу v9...</h2>
             </div>
             <div class="text-[11px] text-slate-500 italic min-h-[16px]" id="loader-phase"></div>
             <div class="space-y-2 text-sm text-slate-600">
                 <div class="flex justify-between"><span>Час:</span><span id="loader-time" class="font-bold text-blue-700">0с</span></div>
                 <div class="flex justify-between"><span>Розміщено:</span><span id="loader-placed" class="font-bold text-green-700">0</span></div>
                 <div class="flex justify-between"><span>Залишилось:</span><span id="loader-unplaced" class="font-bold text-orange-600">—</span></div>
+                <div class="flex justify-between border-t pt-2 mt-1">
+                    <span class="text-slate-500">🏆 Найкращий результат:</span>
+                    <span id="loader-best" class="font-bold text-purple-700">—</span>
+                </div>
             </div>
             <div class="w-full bg-gray-100 rounded-full h-3 overflow-hidden">
                 <div id="loader-bar" class="h-3 bg-blue-500 rounded-full transition-all" style="width:0%"></div>
@@ -1376,6 +1505,7 @@ function updateLoader(restart, ms, placed, total, unplaced, phase) {
     if (g('loader-unplaced'))g('loader-unplaced').textContent = unplaced > 0 ? String(unplaced) : '—';
     if (g('loader-phase'))   g('loader-phase').textContent   = phase || '';
     if (g('loader-bar'))     g('loader-bar').style.width     = total > 0 ? `${Math.round(placed / total * 100)}%` : '0%';
+    if (g('loader-best'))    g('loader-best').textContent    = unplaced === 0 ? '✅ Всі розміщені!' : unplaced === Infinity ? '—' : `${unplaced} не розміщено`;
 }
 
 function hideLoader() {
