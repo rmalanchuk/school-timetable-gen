@@ -612,17 +612,6 @@ function isHardValid(task, first, d, s, schedule) {
     {
         const tSlots = [...new Set(schedule.filter(ls => ls.day === d && ls.teacherId === first.teacherId && ls.slot >= 1 && ls.slot <= 7).map(ls => ls.slot))];
 
-        // Ліміт: якщо вчитель вже має 5+ уроків в цей день і є менш завантажений день — заборона
-        if (tSlots.length >= 5) {
-            for (let od = 0; od < 5; od++) {
-                if (od === d) continue;
-                const allRed = [1,2,3,4,5].every(s2 => task.items.some(it => getTeacherStatus(it.teacherId, od, s2) === 2));
-                if (allRed) continue; // цей день повністю заблокований — не рахуємо
-                const tOther = schedule.filter(ls => ls.day === od && ls.teacherId === first.teacherId && 1 <= ls.slot && ls.slot <= 7).length;
-                if (tOther < tSlots.length) return false; // є менш завантажений день
-            }
-        }
-
         if (tSlots.length > 0) {
             const all = [...tSlots, s].sort((a, b) => a - b);
             let gaps = 0, bigGap = false;
@@ -1338,6 +1327,22 @@ function countValidSlots(task, schedule) {
     return c;
 }
 
+// Швидка версія — тільки базові перевірки, без повного isHardValid
+// Використовується для визначення "є взагалі хоч якесь місце?"
+function hasAnySlot(task, schedule) {
+    const first = task.items[0];
+    for (let d = 0; d < 5; d++) {
+        for (let s = 1; s <= 7; s++) {
+            if (task.items.some(it => getTeacherStatus(it.teacherId, d, s) === 2)) continue;
+            if (schedule.some(ls => ls.day === d && ls.slot === s && task.items.some(it => it.teacherId === ls.teacherId))) continue;
+            if (schedule.some(ls => ls.day === d && ls.slot === s && ls.classId === first.classId &&
+                !task.items.some(it => it.teacherId === ls.teacherId))) continue;
+            return true;
+        }
+    }
+    return false;
+}
+
 // ================================================================
 // REPAIR — адаптивна глибина:
 //   > 20 нерозміщених → глибина 3, блокери 4
@@ -1348,6 +1353,8 @@ function countValidSlots(task, schedule) {
 async function repairUnplaced(unplacedTasks, schedule, startTime, restart, total) {
     let noProgress = 0;
     const MAX = 1500;
+    const repairStart = Date.now();
+    const REPAIR_MAX_MS = 8000; // max 8 секунд на repair
 
     // Лічильник невдалих спроб для кожної задачі
     const taskFailCount = new Map();
@@ -1366,8 +1373,8 @@ async function repairUnplaced(unplacedTasks, schedule, startTime, restart, total
             await tick();
         }
 
-        // Якщо надто довго без прогресу — виходимо
-        if (noProgress > 80) break;
+        // Виходимо якщо застрягли або час вийшов
+        if (noProgress > 80 || Date.now() - repairStart > REPAIR_MAX_MS) break;
 
         // Кожні 25 ітерацій без прогресу — перемішуємо
         if (noProgress > 0 && noProgress % 25 === 0) {
@@ -1395,8 +1402,7 @@ async function repairUnplaced(unplacedTasks, schedule, startTime, restart, total
 
         // Кожні 8 спроб: якщо 0 валідних слотів — задача заблокована поточним розкладом
         if (fails % 8 === 0) {
-            const vc = countValidSlots(task, schedule);
-            if (vc === 0) {
+            if (!hasAnySlot(task, schedule)) {
                 if (unplacedTasks.length > 1) {
                     unplacedTasks.push(unplacedTasks.shift());
                     noProgress++;
@@ -1496,7 +1502,7 @@ async function localSearchRepair(unplacedTasks, schedule, startTime, restart, to
         // Перевіряємо чи є взагалі валідні слоти
         const lsFails = (lsTaskFails.get(task) || 0) + 1;
         lsTaskFails.set(task, lsFails);
-        if (lsFails % 10 === 0 && countValidSlots(task, schedule) === 0) {
+        if (lsFails % 10 === 0 && !hasAnySlot(task, schedule)) {
             if (unplacedTasks.length > 1) {
                 unplacedTasks.push(unplacedTasks.shift());
                 noProgress++;
