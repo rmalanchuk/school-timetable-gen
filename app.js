@@ -320,7 +320,10 @@ async function generateSchedule() {
             await tick();
 
             await localSearchRepair(stillUnplaced, schedule, startTime, restart, total);
+            subjectOrderFix(schedule);
+            priorityPushUp(schedule);
             gapFix(schedule);
+            gapFix(schedule); // другий прохід для залишкових вікон
             selfReorder(schedule);
             sanitize(schedule);
 
@@ -902,59 +905,77 @@ function selfReorder(schedule) {
 // GAP FIX
 // ================================================================
 function gapFix(schedule) {
-    for (let pass = 0; pass < 100; pass++) {
+    function tGaps(tid, d) {
+        const sl = [...new Set(schedule.filter(ls=>ls.day===d&&ls.teacherId===tid&&1<=ls.slot&&ls.slot<=7).map(ls=>ls.slot))].sort((a,b)=>a-b);
+        let gaps=0,big=false;
+        for(let i=1;i<sl.length;i++){const g=sl[i]-sl[i-1]-1;if(g>0)gaps++;if(g>1)big=true;}
+        return {gaps,big,slots:sl};
+    }
+
+    for (let pass = 0; pass < 60; pass++) {
         let changed = false;
-        const tIds = [...new Set(schedule.filter(ls => !ls.isManual && 1 <= ls.slot && ls.slot <= 7).map(ls => ls.teacherId))];
+        const tIds = [...new Set(schedule.filter(ls=>!ls.isManual&&1<=ls.slot&&ls.slot<=7).map(ls=>ls.teacherId))];
+
         for (const tid of tIds) {
             for (let d = 0; d < 5; d++) {
-                const tSlots = [...new Set(schedule.filter(ls => ls.day === d && ls.teacherId === tid && 1 <= ls.slot && ls.slot <= 7).map(ls => ls.slot))].sort((a, b) => a - b);
-                if (tSlots.length < 2) continue;
-                const gaps = [];
-                for (let i = 0; i + 1 < tSlots.length; i++) { const g = tSlots[i+1] - tSlots[i] - 1; if (g > 0) gaps.push({ lo: tSlots[i], hi: tSlots[i+1], size: g }); }
-                if (gaps.length === 0) continue; // немає вікон — пропускаємо
-                gaps.sort((a, b) => b.size - a.size);
-                for (const gap of gaps) {
-                    const afterL  = schedule.find(ls => ls.day === d && ls.teacherId === tid && ls.slot === gap.hi && !ls.isManual);
-                    const beforeL = schedule.find(ls => ls.day === d && ls.teacherId === tid && ls.slot === gap.lo && !ls.isManual);
+                const {gaps, big, slots:tSlots} = tGaps(tid, d);
+                if (!big && gaps === 0) continue;
+
+                const gapList = [];
+                for(let i=0;i+1<tSlots.length;i++){
+                    const g=tSlots[i+1]-tSlots[i]-1;
+                    if(g>0) gapList.push({lo:tSlots[i],hi:tSlots[i+1],size:g});
+                }
+                gapList.sort((a,b)=>b.size-a.size);
+
+                for (const gap of gapList) {
+                    const afterL  = schedule.find(ls=>ls.day===d&&ls.teacherId===tid&&ls.slot===gap.hi&&!ls.isManual);
+                    const beforeL = schedule.find(ls=>ls.day===d&&ls.teacherId===tid&&ls.slot===gap.lo&&!ls.isManual);
+
+                    // S1: swap afterL ↔ урок на gap.lo+1
                     if (afterL) {
-                        for (const cand of schedule.filter(ls => ls.day === d && ls.slot === gap.lo+1 && !ls.isManual && ls.teacherId !== tid))
+                        for (const cand of schedule.filter(ls=>ls.day===d&&ls.slot===gap.lo+1&&!ls.isManual&&ls.teacherId!==tid)) {
                             if (safeSwap(afterL, cand, schedule)) { changed = true; break; }
+                        }
                     }
                     if (changed) break;
-                    if (beforeL && !changed) {
-                        for (const cand of schedule.filter(ls => ls.day === d && ls.slot === gap.hi-1 && !ls.isManual && ls.teacherId !== tid))
+
+                    // S2: swap beforeL ↔ урок на gap.hi-1
+                    if (beforeL) {
+                        for (const cand of schedule.filter(ls=>ls.day===d&&ls.slot===gap.hi-1&&!ls.isManual&&ls.teacherId!==tid)) {
                             if (safeSwap(beforeL, cand, schedule)) { changed = true; break; }
+                        }
                     }
                     if (changed) break;
-                    if (afterL && !changed) {
-                        const pL   = { items: [afterL], priority: getPriority(afterL.subject), type: afterL.pairType || 'single' };
+
+                    // S3: перемістити afterL в інший день
+                    if (afterL) {
+                        const pL = {items:[afterL],priority:getPriority(afterL.subject),type:afterL.pairType||'single'};
                         const idxA = schedule.indexOf(afterL);
                         if (idxA !== -1) {
                             schedule.splice(idxA, 1);
-                            for (let nd = 0; nd < 5 && !changed; nd++) {
-                                if (nd === d) continue;
-                                for (let ns = 1; ns <= 7 && !changed; ns++) {
+                            let moved = false;
+                            for (let nd=0;nd<5&&!moved;nd++) {
+                                if (nd===d) continue;
+                                for (let ns=1;ns<=7&&!moved;ns++) {
                                     if (!isHardValid(pL, afterL, nd, ns, schedule)) continue;
-                                    const tNew = [...new Set(schedule.filter(ls => ls.day === d && ls.teacherId === tid && 1 <= ls.slot && ls.slot <= 7).map(ls => ls.slot))].sort((a, b) => a - b);
-                                    let nGaps = 0, nBig = false;
-                                    for (let i = 1; i < tNew.length; i++) { const ng = tNew[i] - tNew[i-1] - 1; if (ng > 0) nGaps++; if (ng > 1) nBig = true; }
-                                    if (nBig || nGaps > 1) continue;
-                                    const clsNew = [...new Set(schedule.filter(ls => ls.day === d && ls.classId === afterL.classId && 1 <= ls.slot && ls.slot <= 7).map(ls => ls.slot))].sort((a, b) => a - b);
-                                    let clsOk = true;
-                                    for (let i = 1; i < clsNew.length; i++) { if (clsNew[i] - clsNew[i-1] > 2) { clsOk = false; break; } }
-                                    if (!clsOk) continue;
-                                    schedule.push({ ...afterL, id: uid('sch'), day: nd, slot: ns });
-                                    changed = true;
+                                    const {gaps:ng, big:nb} = tGaps(tid, d);
+                                    if (nb || ng > gaps) continue;
+                                    const clsOld = [...new Set(schedule.filter(ls=>ls.day===d&&ls.classId===afterL.classId&&1<=ls.slot&&ls.slot<=7).map(ls=>ls.slot))].sort((a,b)=>a-b);
+                                    let clsOk=true;
+                                    for(let i=1;i<clsOld.length;i++){if(clsOld[i]-clsOld[i-1]>2){clsOk=false;break;}}
+                                    if(!clsOk) continue;
+                                    schedule.push({...afterL,id:uid('sch'),day:nd,slot:ns});
+                                    changed=true; moved=true;
                                 }
                             }
-                            if (!changed) schedule.splice(idxA, 0, afterL);
+                            if (!moved) schedule.splice(idxA, 0, afterL);
                         }
                     }
                     if (changed) break;
                 }
-                if (changed) break;
+                // продовжуємо до наступного вчителя без break
             }
-            if (changed) break;
         }
         if (!changed) break;
     }
@@ -1113,11 +1134,14 @@ async function repairUnplaced(unplacedTasks, schedule, startTime, restart, total
 // ================================================================
 async function localSearchRepair(unplacedTasks, schedule, startTime, restart, total) {
     const MAX = 800; let noProgress = 0;
+    const lsStartTime = Date.now();
     for (let iter = 0; iter < MAX && unplacedTasks.length > 0; iter++) {
         if (_generatorStop) break;
-        if (iter % 10 === 0) {
+        // Виходимо якщо localSearch крутиться > 20с без результату
+        if (Date.now() - lsStartTime > 20000) break;
+        if (iter % 3 === 0) {
             updateLoader(restart, Date.now()-startTime, total-unplacedTasks.length, total, unplacedTasks.length,
-                `🔍 Local Search iter ${iter} | Залишилось: ${unplacedTasks.length} (глибина 6)`);
+                `🔍 Local Search iter ${iter} | Залишилось: ${unplacedTasks.length} (глибина 7)`);
             await tick();
         }
         if (noProgress > 30) {
