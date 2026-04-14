@@ -695,6 +695,21 @@ function scoreSlot(task, first, d, s, schedule) {
         }
     }
 
+    // Gym уроки — штраф якщо зала вже зайнята в цей слот іншим класом
+    // (це вже є в isHardValid, але додаємо score penalty для "сусідніх" слотів)
+    if (getRoomType(first.subject) === 'gym') {
+        // Бонус за суміжність з іншими gym уроками того ж вчителя
+        const gymSlots = schedule.filter(ls =>
+            ls.day === d && ls.teacherId === first.teacherId &&
+            getRoomType(ls.subject) === 'gym' && 1 <= ls.slot && ls.slot <= 7
+        ).map(ls => ls.slot);
+        if (gymSlots.length > 0) {
+            const minDist = Math.min(...gymSlots.map(gs => Math.abs(gs - s)));
+            if (minDist === 1) score -= 200;  // сусідній gym — бонус
+            else score += minDist * 100;
+        }
+    }
+
     score += Math.random() * 10;
     return score;
 }
@@ -847,17 +862,31 @@ function phasedGreedy(tasks, schedule) {
     priorityPushUp(schedule);
     subjectOrderFix(schedule);
 
-    // РАУНД C: prio-2
-    for (const task of shuffleArr(tasks.filter(t => t.priority === 2))) {
+    // РАУНД C: prio-2 (без gym)
+    for (const task of shuffleArr(tasks.filter(t => t.priority === 2 && getRoomType(t.items[0].subject) !== 'gym'))) {
         if (!greedyPlace(task, schedule)) unplaced.push(task);
     }
 
-    // РАУНД D: prio-3
-    for (const task of shuffleArr(tasks.filter(t => t.priority >= 3))) {
+    // РАУНД D: GYM — обмежені вчителі першими (Крайник перед Машкаринцем)
+    const gymTasks = tasks.filter(t => getRoomType(t.items[0].subject) === 'gym');
+    gymTasks.sort((a, b) => {
+        let aF=0, bF=0;
+        for(let d=0;d<5;d++) for(let s=1;s<=7;s++) {
+            if(getTeacherStatus(a.items[0].teacherId,d,s)!==2) aF++;
+            if(getTeacherStatus(b.items[0].teacherId,d,s)!==2) bF++;
+        }
+        return aF - bF; // менше вільних слотів → першими
+    });
+    for (const task of gymTasks) {
         if (!greedyPlace(task, schedule)) unplaced.push(task);
     }
 
-    // РАУНД E: pushUp + retry нерозміщених
+    // РАУНД E: prio-3 не-gym
+    for (const task of shuffleArr(tasks.filter(t => t.priority >= 3 && getRoomType(t.items[0].subject) !== 'gym'))) {
+        if (!greedyPlace(task, schedule)) unplaced.push(task);
+    }
+
+    // РАУНД F: pushUp + retry
     priorityPushUp(schedule);
     gapFix(schedule);
     const retry = [...unplaced]; unplaced.length = 0;
@@ -1260,11 +1289,25 @@ async function repairUnplaced(unplacedTasks, schedule, startTime, restart, total
             continue;
         }
 
-        // Якщо ця конкретна задача не вміщується вже 40 разів — пропускаємо до кращого моменту
         const fails = (taskFailCount.get(taskKey) || 0) + 1;
         taskFailCount.set(taskKey, fails);
+
+        // Кожні 8 спроб: якщо 0 валідних слотів — задача заблокована поточним розкладом
+        if (fails % 8 === 0) {
+            const vc = countValidSlots(task, schedule);
+            if (vc === 0) {
+                if (unplacedTasks.length > 1) {
+                    unplacedTasks.push(unplacedTasks.shift());
+                    noProgress++;
+                    continue;
+                }
+                break; // єдина задача без місця — виходимо на рестарт
+            }
+        }
+
+        // 40 невдалих спроб — відкладаємо
         if (fails > 40 && unplacedTasks.length > 1) {
-            unplacedTasks.push(unplacedTasks.shift()); // відкладаємо, пробуємо інші
+            unplacedTasks.push(unplacedTasks.shift());
             noProgress++;
             continue;
         }
