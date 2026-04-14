@@ -312,7 +312,9 @@ async function generateSchedule() {
     while (!_generatorStop) {
         restart++;
 
-        const manual   = state.schedule.filter(s => s.slot === 0 || s.slot === 8 || s.isManual);
+        // Беремо тільки справжні ручні уроки (слот 0/8 або явно isManual)
+        // Всі інші — результат попередньої генерації, не беремо
+        const manual   = state.schedule.filter(s => (s.slot === 0 || s.slot === 8 || s.isManual === true));
         const schedule = manual.map(s => ({ ...s }));
         const tasks    = allTasks.map(t => ({ ...t, items: t.items.map(i => ({ ...i })) }));
 
@@ -321,8 +323,13 @@ async function generateSchedule() {
 
         // Фаза 2: quality passes
         subjectOrderFix(schedule);
-        priorityPushUp(schedule);
+        // gapFix ПЕРШИЙ — прибирає вікна вчителів (напр. Бенесько [1,2,4,5,6] → [1,2,3,5,6])
+        // тоді priorityPushUp може зробити swap який раніше блокувався вікном
         gapFix(schedule);
+        priorityPushUp(schedule);
+        // Ще раз обидва — priorityPushUp міг перемістити уроки і створити нові вікна
+        gapFix(schedule);
+        priorityPushUp(schedule);
 
         // Фаза 3: repair
         const stillUnplaced = [...unplaced];
@@ -374,23 +381,22 @@ function shuffleArr(arr) {
     return arr;
 }
 
-// Видаляємо тимчасові записи (tmp_) і дублікати
+// Видаляємо тимчасові записи і дублікати
 function sanitize(schedule) {
     // 1. Видаляємо tmp_
     for (let i = schedule.length - 1; i >= 0; i--) {
-        if (String(schedule[i].id || '').startsWith('tmp_')) {
+        const id = String(schedule[i].id || '');
+        if (id.startsWith('tmp_')) {
             schedule.splice(i, 1);
         }
     }
-    // 2. Видаляємо дублікати (teacher+day+slot — один вчитель двічі в одному слоті)
-    //    Залишаємо перший sch_ або перший взагалі
+    // 2. Видаляємо дублікати teacher+day+slot
     const seen = new Map();
     for (let i = schedule.length - 1; i >= 0; i--) {
         const ls = schedule[i];
         if (ls.slot < 1 || ls.slot > 7) continue;
-        const key = ls.teacherId + '|' + ls.day + '|' + ls.slot;
+        const key = ls.teacherId + '|' + ls.day + '|' + ls.slot + '|' + ls.classId;
         if (seen.has(key)) {
-            // Є дублікат — видаляємо поточний (залишаємо перший що зустрівся)
             schedule.splice(i, 1);
         } else {
             seen.set(key, true);
@@ -591,7 +597,10 @@ function isHardValid(task, first, d, s, schedule) {
         }
     }
 
-    // 7. Вікно вчителя: max 1 вікно розміром 1 на день
+    // 7. Вікно вчителя:
+    //    НІКОЛИ не дозволяємо вікно > 1 урок
+    //    Вікно = 1 урок: дозволено лише якщо у вчителя <= 3 уроків в цей день
+    //    (коли багато уроків — вимагаємо підряд)
     {
         const tSlots = [...new Set(schedule
             .filter(ls => ls.day === d && ls.teacherId === first.teacherId && ls.slot >= 1 && ls.slot <= 7)
@@ -604,8 +613,10 @@ function isHardValid(task, first, d, s, schedule) {
                 if (g > 0) gaps++;
                 if (g > 1) bigGap = true;
             }
-            if (bigGap)   return false; // вікно > 1 урок — заборона
-            if (gaps > 1) return false; // > 1 вікна — заборона
+            if (bigGap)   return false;  // вікно > 1 — заборона завжди
+            if (gaps > 1) return false;  // > 1 вікна — заборона завжди
+            // Вікно = 1: дозволяємо лише якщо вчитель матиме <= 4 уроків
+            if (gaps > 0 && all.length >= 5) return false; // >= 5 уроків підряд — вікна заборонені
         }
     }
 
@@ -701,6 +712,19 @@ function scoreSlot(task, first, d, s, schedule) {
     // Клас без уроків цього дня — починати з 1
     const classToday = [...new Set(schedule.filter(ls => ls.day === d && ls.classId === first.classId && ls.slot >= 1 && ls.slot <= 7).map(ls => ls.slot))];
     if (classToday.length === 0 && s > 1) score += (s - 1) * 150;
+
+    // Бонус за суміжність того самого ПРЕДМЕТУ у вчителя в цей день
+    // (щоб інформатика йшла блоком, а не через уроки)
+    const sameSubjTeacher = schedule.filter(ls =>
+        ls.day === d && ls.teacherId === first.teacherId &&
+        ls.subject === first.subject && 1 <= ls.slot && ls.slot <= 7
+    ).map(ls => ls.slot);
+    if (sameSubjTeacher.length > 0) {
+        const minSubjDist = Math.min(...sameSubjTeacher.map(ts => Math.abs(ts - s)));
+        if (minSubjDist === 1) score -= 300; // сусідній урок того ж предмету — великий бонус
+        else if (minSubjDist === 2) score += 100;
+        else score += minSubjDist * 200; // далеко від інших уроків цього предмету — штраф
+    }
 
     score += Math.random() * 10;
     return score;
