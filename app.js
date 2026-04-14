@@ -1183,7 +1183,20 @@ function buildCandidates(task, first, schedule, maxBlockers) {
             const bT = schedule.filter(ls => ls.day === d && ls.slot === s && task.items.some(it => it.teacherId === ls.teacherId) && !ls.isManual);
             const bC = schedule.filter(ls => ls.day === d && ls.slot === s && ls.classId === first.classId && !ls.isManual);
             const blockers = [...new Map([...bT, ...bC].map(b => [b.id, b])).values()];
-            if (blockers.length <= maxBlockers) result.push({ d, s, blockers, score: s + d * 7 });
+
+            // Стандартний ліміт блокерів
+            if (blockers.length <= maxBlockers) {
+                result.push({ d, s, blockers, score: s + d * 7 });
+                continue;
+            }
+
+            // Якщо клас повний (7 уроків) — дозволяємо більше блокерів
+            // але тільки якщо всі блокери можна евакуювати (prio-3 або prio-2)
+            // і їх не більше maxBlockers+2
+            if (cs.length >= 6 && blockers.length <= maxBlockers + 2) {
+                const allEvacuable = blockers.every(b => !b.isManual && getPriority(b.subject) >= 2);
+                if (allEvacuable) result.push({ d, s, blockers, score: s + d * 7 + 50 }); // штраф за складність
+            }
         }
     }
     return result.sort((a, b) => a.blockers.length - b.blockers.length || a.score - b.score);
@@ -1206,10 +1219,12 @@ async function repairUnplaced(unplacedTasks, schedule, startTime, restart, total
     let noProgress = 0;
     const MAX = 1500;
 
+    // Лічильник невдалих спроб для кожної задачі
+    const taskFailCount = new Map();
+
     for (let iter = 0; iter < MAX && unplacedTasks.length > 0; iter++) {
         if (_generatorStop) break;
 
-        // Адаптивна глибина залежно від кількості залишку
         const remaining = unplacedTasks.length;
         const depth    = remaining > 20 ? 3 : remaining > 7 ? 5 : 7;
         const maxBlock = remaining > 20 ? 4 : remaining > 7 ? 3 : 2;
@@ -1221,11 +1236,11 @@ async function repairUnplaced(unplacedTasks, schedule, startTime, restart, total
             await tick();
         }
 
-        // Якщо надто довго без прогресу — виходимо (рестарт дасть кращий результат)
-        if (noProgress > 60) break;
+        // Якщо надто довго без прогресу — виходимо
+        if (noProgress > 80) break;
 
-        // Кожні 30 ітерацій без прогресу — перемішуємо і пробуємо greedy знову
-        if (noProgress > 0 && noProgress % 30 === 0) {
+        // Кожні 25 ітерацій без прогресу — перемішуємо
+        if (noProgress > 0 && noProgress % 25 === 0) {
             shuffleArr(unplacedTasks);
             const tmp = [...unplacedTasks]; unplacedTasks.length = 0;
             for (const t of tmp) { if (!greedyPlace(t, schedule)) unplacedTasks.push(t); }
@@ -1237,9 +1252,21 @@ async function repairUnplaced(unplacedTasks, schedule, startTime, restart, total
 
         const task = unplacedTasks[0];
         const first = task.items[0];
+        const taskKey = first.teacherId + '|' + first.classId + '|' + first.subject;
 
         if (greedyPlace(task, schedule)) {
-            unplacedTasks.shift(); noProgress = 0; continue;
+            unplacedTasks.shift(); noProgress = 0;
+            taskFailCount.delete(taskKey);
+            continue;
+        }
+
+        // Якщо ця конкретна задача не вміщується вже 40 разів — пропускаємо до кращого моменту
+        const fails = (taskFailCount.get(taskKey) || 0) + 1;
+        taskFailCount.set(taskKey, fails);
+        if (fails > 40 && unplacedTasks.length > 1) {
+            unplacedTasks.push(unplacedTasks.shift()); // відкладаємо, пробуємо інші
+            noProgress++;
+            continue;
         }
 
         const candidates = buildCandidates(task, first, schedule, maxBlock);
@@ -1258,6 +1285,7 @@ async function repairUnplaced(unplacedTasks, schedule, startTime, restart, total
                 commitTask(task, d, s, schedule);
                 for (const r of evacuated) commitEvac(r, schedule);
                 unplacedTasks.shift(); repaired = true; noProgress = 0;
+                taskFailCount.delete(taskKey);
                 break;
             } else {
                 for (const r of evacuated) rollbackEvac(r, schedule);
@@ -1340,7 +1368,12 @@ async function localSearchRepair(unplacedTasks, schedule, startTime, restart, to
             }
         }
 
-        if (!repaired) { noProgress++; unplacedTasks.push(unplacedTasks.shift()); }
+        if (!repaired) {
+            noProgress++;
+            // Відкладаємо якщо ця задача безнадійна прямо зараз
+            const lsKey = first.teacherId + '|' + first.classId + '|' + first.subject;
+            unplacedTasks.push(unplacedTasks.shift());
+        }
     }
 }
 
