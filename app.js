@@ -397,20 +397,28 @@ function shuffleArr(arr) {
 }
 
 function sanitize(schedule) {
-    // Видаляємо tmp_
+    // 1. Видаляємо tmp_ (незакомічені евакуації)
     for (let i = schedule.length - 1; i >= 0; i--) {
         if (String(schedule[i].id || '').startsWith('tmp_')) schedule.splice(i, 1);
     }
-    // Видаляємо дублікати teacher+day+slot+classId
+
+    // 2. Видаляємо дублікати teacher+day+slot (той самий вчитель двічі в одному слоті)
+    // Залишаємо перший зустрітий (зазвичай оригінал)
     const seen = new Map();
-    for (let i = schedule.length - 1; i >= 0; i--) {
+    for (let i = 0; i < schedule.length; i++) {
         const ls = schedule[i];
         if (ls.slot < 1 || ls.slot > 7) continue;
         const key = ls.teacherId + '|' + ls.day + '|' + ls.slot + '|' + ls.classId;
-        if (seen.has(key)) schedule.splice(i, 1);
-        else seen.set(key, true);
+        if (seen.has(key)) {
+            schedule.splice(i, 1);
+            i--;
+        } else {
+            seen.set(key, true);
+        }
     }
-    // Обрізаємо надлишок по teacher+class+subject
+
+    // 3. Обрізаємо надлишок по teacher+class+subject
+    // Рахуємо скільки потрібно
     const needed = {};
     state.workload.forEach(w => {
         const h = parseFloat(w.hours);
@@ -420,15 +428,17 @@ function sanitize(schedule) {
         const key = w.teacherId + '|' + w.classId + '|' + w.subject.toLowerCase();
         needed[key] = (needed[key] || 0) + slots;
     });
+
+    // Ітеруємо ЗВЕРХУ вниз — залишаємо перші N, видаляємо надлишкові
     const counts = {};
-    for (let i = schedule.length - 1; i >= 0; i--) {
+    for (let i = 0; i < schedule.length; i++) {
         const ls = schedule[i];
         if (ls.slot < 1 || ls.slot > 7 || ls.isManual) continue;
         const key = ls.teacherId + '|' + ls.classId + '|' + ls.subject.toLowerCase();
         counts[key] = (counts[key] || 0) + 1;
         if (counts[key] > (needed[key] || 0)) {
             schedule.splice(i, 1);
-            counts[key]--;
+            i--;
         }
     }
 }
@@ -601,6 +611,18 @@ function isHardValid(task, first, d, s, schedule) {
     }
     {
         const tSlots = [...new Set(schedule.filter(ls => ls.day === d && ls.teacherId === first.teacherId && ls.slot >= 1 && ls.slot <= 7).map(ls => ls.slot))];
+
+        // Ліміт: якщо вчитель вже має 5+ уроків в цей день і є менш завантажений день — заборона
+        if (tSlots.length >= 5) {
+            for (let od = 0; od < 5; od++) {
+                if (od === d) continue;
+                const allRed = [1,2,3,4,5].every(s2 => task.items.some(it => getTeacherStatus(it.teacherId, od, s2) === 2));
+                if (allRed) continue; // цей день повністю заблокований — не рахуємо
+                const tOther = schedule.filter(ls => ls.day === od && ls.teacherId === first.teacherId && 1 <= ls.slot && ls.slot <= 7).length;
+                if (tOther < tSlots.length) return false; // є менш завантажений день
+            }
+        }
+
         if (tSlots.length > 0) {
             const all = [...tSlots, s].sort((a, b) => a - b);
             let gaps = 0, bigGap = false;
@@ -680,8 +702,9 @@ function scoreSlot(task, first, d, s, schedule) {
         score += (s - 1) * 80;
     }
     const dayCount = schedule.filter(ls => ls.day === d && ls.teacherId === first.teacherId && ls.slot >= 1 && ls.slot <= 7).length;
-    if      (dayCount >= 6) score += 1500;
-    else if (dayCount >= 5) score += 500;
+    if      (dayCount >= 6) score += 4000;
+    else if (dayCount >= 5) score += 1500;
+    else if (dayCount >= 4) score += 300;
     const sameDay = schedule.filter(ls => ls.day === d && ls.classId === first.classId && ls.subject === first.subject);
     if (sameDay.length > 0) {
         const adj = sameDay.some(ls => Math.abs(ls.slot - s) === 1);
@@ -860,11 +883,13 @@ function phasedGreedy(tasks, schedule) {
         // Дні: спочатку де вчитель найменш завантажений на 1-4
         // І де клас має найменше уроків (більше шансів знайти місце)
         const days = [...dayOrder].sort((a, b) => {
-            const tA = schedule.filter(ls => ls.day === a && ls.teacherId === first.teacherId && 1 <= ls.slot && ls.slot <= 4).length;
-            const tB = schedule.filter(ls => ls.day === b && ls.teacherId === first.teacherId && 1 <= ls.slot && ls.slot <= 4).length;
+            const tA_all = schedule.filter(ls => ls.day === a && ls.teacherId === first.teacherId && 1 <= ls.slot && ls.slot <= 7).length;
+            const tB_all = schedule.filter(ls => ls.day === b && ls.teacherId === first.teacherId && 1 <= ls.slot && ls.slot <= 7).length;
+            const tA_14  = schedule.filter(ls => ls.day === a && ls.teacherId === first.teacherId && 1 <= ls.slot && ls.slot <= 4).length;
+            const tB_14  = schedule.filter(ls => ls.day === b && ls.teacherId === first.teacherId && 1 <= ls.slot && ls.slot <= 4).length;
             const cA = new Set(schedule.filter(ls => ls.day === a && ls.classId === first.classId && 1 <= ls.slot && ls.slot <= 7).map(ls => ls.slot)).size;
             const cB = new Set(schedule.filter(ls => ls.day === b && ls.classId === first.classId && 1 <= ls.slot && ls.slot <= 7).map(ls => ls.slot)).size;
-            return (tA * 2 + cA) - (tB * 2 + cB);
+            return (tA_all * 3 + tA_14 + cA) - (tB_all * 3 + tB_14 + cB);
         });
         // Спроба 1: слоти 1-4
         for (const d of days) {
@@ -1257,8 +1282,24 @@ function commitEvac(result, schedule) {
     if (!result) return;
     if (result.cascade) commitEvac(result.cascade, schedule);
     result.moved.id = uid('sch');
+    // Видаляємо оригінал — шукаємо і за посиланням, і за ключем
     const oi = schedule.indexOf(result.orig);
-    if (oi !== -1) schedule.splice(oi, 1);
+    if (oi !== -1) {
+        schedule.splice(oi, 1);
+    } else {
+        // Якщо посилання не знайшлось — шукаємо за ключем щоб уникнути дублікатів
+        const key = result.orig.teacherId + '|' + result.orig.classId + '|' +
+                    result.orig.subject + '|' + result.orig.day + '|' + result.orig.slot;
+        for (let i = schedule.length - 1; i >= 0; i--) {
+            const ls = schedule[i];
+            if (ls.teacherId === result.orig.teacherId && ls.classId === result.orig.classId &&
+                ls.subject === result.orig.subject && ls.day === result.orig.day &&
+                ls.slot === result.orig.slot && ls !== result.moved) {
+                schedule.splice(i, 1);
+                break;
+            }
+        }
+    }
 }
 
 function buildCandidates(task, first, schedule, maxBlockers) {
@@ -1422,11 +1463,12 @@ async function localSearchRepair(unplacedTasks, schedule, startTime, restart, to
     }
     if (unplacedTasks.length === 0) return;
 
+    const lsTaskFails = new Map();
     for (let iter = 0; iter < MAX && unplacedTasks.length > 0; iter++) {
         if (_generatorStop) break;
 
-        // Виходимо якщо застрягли — рестарт дасть кращий результат
-        if (noProgress > 60 || Date.now() - lsStart > 18000) break;
+        // Виходимо якщо застрягли
+        if (noProgress > 60 || Date.now() - lsStart > 15000) break;
 
         const remaining = unplacedTasks.length;
         const depth    = remaining > 20 ? 3 : remaining > 7 ? 5 : 7;
@@ -1446,7 +1488,21 @@ async function localSearchRepair(unplacedTasks, schedule, startTime, restart, to
         const first = task.items[0];
 
         if (greedyPlace(task, schedule)) {
-            unplacedTasks.shift(); noProgress = 0; continue;
+            unplacedTasks.shift(); noProgress = 0;
+            lsTaskFails.delete(task);
+            continue;
+        }
+
+        // Перевіряємо чи є взагалі валідні слоти
+        const lsFails = (lsTaskFails.get(task) || 0) + 1;
+        lsTaskFails.set(task, lsFails);
+        if (lsFails % 10 === 0 && countValidSlots(task, schedule) === 0) {
+            if (unplacedTasks.length > 1) {
+                unplacedTasks.push(unplacedTasks.shift());
+                noProgress++;
+                continue;
+            }
+            break;
         }
 
         const candidates = buildCandidates(task, first, schedule, maxBlock);
